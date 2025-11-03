@@ -1,0 +1,116 @@
+description: >
+  Quality control station monitoring across multiple manufacturing zones.
+  Uses wildcard patterns with collect to aggregate inspection results.
+  Demonstrates dynamic labeling for quality assurance analytics.
+
+metadata:
+  name: Quality Control Monitoring - Zone Aggregation
+  version: 1.0.0
+
+parameters:
+  qualitySystemHost:
+    type: string
+    default: "192.168.110.20"
+    description: "Quality management system server"
+
+resources:
+  # Quality System Connection
+  qualityConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref qualitySystemHost
+        port: 4840
+
+  # Zone A Inspection Results
+  zoneAInspectionEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref qualityConnection
+      subscribe:
+        nodeId: ns=2;s=QualityStation.ZoneA.InspectionResult
+        interval: 20000
+      topic: quality/zones/zone-a/inspection-results
+
+  # Zone B Inspection Results
+  zoneBInspectionEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref qualityConnection
+      subscribe:
+        nodeId: ns=2;s=QualityStation.ZoneB.InspectionResult
+        interval: 20000
+      topic: quality/zones/zone-b/inspection-results
+
+  # Zone C Inspection Results
+  zoneCInspectionEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref qualityConnection
+      subscribe:
+        nodeId: ns=2;s=QualityStation.ZoneC.InspectionResult
+        interval: 20000
+      topic: quality/zones/zone-c/inspection-results
+
+  # Multi-Zone Quality Analytics
+  qualityAnalytics:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          # Wildcard pattern: quality/zones/+zone/inspection-results
+          # Dynamic label: 'zone_{zone}' creates unique keys
+          topic: ${Cybus::MqttRoot}/quality/zones/+zone/inspection-results
+          label: 'zone_{zone}'
+        publish:
+          topic: analytics/quality/multi-zone-summary
+        rules:
+        - collect: {}  # Aggregate all quality zones
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "reporting_zone": $context.vars.zone,
+                "total_zones": $count($keys($)),
+                "current_zone_result": $lookup($, 'zone_' & $context.vars.zone),
+                "all_zones_data": $
+              }
+
+# Example Input Messages (from OPC UA quality endpoints):
+#
+# From !ref zoneAInspectionEndpoint
+# Topic: quality/zones/zone-a/inspection-results
+# Payload: {"pass_count": 145, "fail_count": 3, "pass_rate": 97.9, "defect_types": ["surface", "dimension"]}
+#
+# From !ref zoneBInspectionEndpoint
+# Topic: quality/zones/zone-b/inspection-results  
+# Payload: {"pass_count": 167, "fail_count": 1, "pass_rate": 99.4, "defect_types": ["dimension"]}
+#
+# From !ref zoneCInspectionEndpoint
+# Topic: quality/zones/zone-c/inspection-results
+# Payload: {"pass_count": 132, "fail_count": 5, "pass_rate": 96.4, "defect_types": ["surface", "alignment", "finish"]}
+#
+# After Collect Rule - All Zones Aggregated:
+# {
+#   "zone_zone-a": {"pass_count": 145, "fail_count": 3, "pass_rate": 97.9, "defect_types": ["surface", "dimension"]},
+#   "zone_zone-b": {"pass_count": 167, "fail_count": 1, "pass_rate": 99.4, "defect_types": ["dimension"]},
+#   "zone_zone-c": {"pass_count": 132, "fail_count": 5, "pass_rate": 96.4, "defect_types": ["surface", "alignment", "finish"]}
+# }
+#
+# Expected Output (when zone-c data arrives):
+# Topic: analytics/quality/multi-zone-summary
+# {
+#   "timestamp": 1730115600000,
+#   "reporting_zone": "zone-c",
+#   "total_zones": 3,
+#   "current_zone_result": {"pass_count": 132, "fail_count": 5, "pass_rate": 96.4, "defect_types": ["surface", "alignment", "finish"]},
+#   "all_zones_data": {
+#     "zone_zone-a": {"pass_count": 145, "fail_count": 3, "pass_rate": 97.9, "defect_types": ["surface", "dimension"]},
+#     "zone_zone-b": {"pass_count": 167, "fail_count": 1, "pass_rate": 99.4, "defect_types": ["dimension"]},
+#     "zone_zone-c": {"pass_count": 132, "fail_count": 5, "pass_rate": 96.4, "defect_types": ["surface", "alignment", "finish"]}
+#   }
+# }

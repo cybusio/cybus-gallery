@@ -1,0 +1,114 @@
+description: >
+  Machine telemetry data enrichment using transform rules.
+  Adds timestamps, validation flags, and metadata to Modbus machine data
+  for maintenance management system integration and predictive analytics.
+
+metadata:
+  name: Machine Telemetry Data Enrichment - Metadata & Validation
+  version: 1.0.0
+
+parameters:
+  modbusGatewayHost:
+    type: string
+    default: "192.168.120.30"
+    description: "Modbus gateway for production machinery"
+
+resources:
+  # Modbus Gateway Connection
+  machineModbusConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Modbus
+      connection:
+        host: !ref modbusGatewayHost
+        port: 502
+
+  # Robot Cell 001 - Status Data via Modbus
+  robotCell001Status:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref machineModbusConnection
+      subscribe:
+        fc: 4
+        address: 100
+        length: 6
+        interval: 8000
+      topic: machines/robot-001/telemetry/raw
+
+  # Conveyor System - Operational Data
+  conveyorSystemData:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref machineModbusConnection
+      subscribe:
+        fc: 3
+        address: 200
+        length: 4
+        interval: 12000
+      topic: machines/conveyor-001/telemetry/raw
+
+  # Machine Data Enrichment - Add Metadata & Validation
+  machineDataEnrichment:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/machines/+machine_id/telemetry/raw
+        publish:
+          topic: 'maintenance/machines/{machine_id}/enriched-data'
+        rules:
+        - transform:
+            expression: |
+              {
+                /* Extract machine ID from MQTT topic wildcard (+machine_id) */
+                "machine_id": $context.vars.machine_id,      /* Context variable from topic pattern */
+                
+                /* Access Modbus array elements by index position */
+                "cycle_count": $[0],                         /* First array element: production cycle count */
+                "operating_hours": $[1],                     /* Second array element: total machine hours */
+                "temperature": $[2],                         /* Third array element: operating temperature */
+                "vibration": $[3],                           /* Fourth array element: vibration level */
+                
+                /* Data validation - check if temperature is within valid sensor range */
+                "temperature_valid": $[2] >= -40 and $[2] <= 150,  /* Boolean: true if temp between -40°C and 150°C */
+                
+                /* Equipment health check - normal vibration levels */
+                "vibration_normal": $[3] < 5.0,              /* Boolean: true if vibration under 5.0 units */
+                
+                /* Add processing metadata */
+                "timestamp": $now(),                         /* Current timestamp when transform processed */
+                "data_source": "modbus_gateway"              /* Static string identifying data origin */
+              }
+
+# Example Input Message (from Modbus endpoint):
+#
+# Topic: machines/robot-001/telemetry/raw
+# Modbus Array: [1247, 7850, 68, 1.8]
+# Array meaning: [cycle_count, operating_hours, temperature, vibration]
+#
+# Expected Output:
+# Topic: maintenance/machines/robot-001/enriched-data
+# {
+#   "machine_id": "robot-001",
+#   "cycle_count": 1247,
+#   "operating_hours": 7850,
+#   "temperature": 68,
+#   "vibration": 1.8,
+#   "temperature_valid": true,
+#   "vibration_normal": true,
+#   "timestamp": 1730529600000,
+#   "data_source": "modbus_gateway"
+# }
+
+# KEY CONCEPTS:
+# ✅ Array indexing: Accessing Modbus data by position ($[0], $[1])
+# ✅ Data validation: Adding validity checks for sensor ranges
+# ✅ Metadata enrichment: Adding timestamps and data source info# MANUFACTURING BENEFITS:
+# ✅ Enhanced data quality with validation flags for reliable analytics
+# ✅ Maintenance context for predictive maintenance systems
+# ✅ Equipment classification for automated maintenance scheduling  
+# ✅ Data provenance tracking for compliance and troubleshooting
+# ✅ Standardized format for integration with CMMS systems
+# ✅ Quality scoring for data-driven maintenance decisions

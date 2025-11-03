@@ -1,0 +1,126 @@
+# -----------------------------------------------------------------------------
+# Device Commissioning File
+# Cybus Learn: How to connect and use a SICK RFID scanner via SOPAS
+# Url: https://learn.cybus.io/lessons/how-to-connect-and-use-a-sick-rfid-scanner/
+# Author: David Schmeding
+# Date: Jul 2020
+# -----------------------------------------------------------------------------
+
+description: >
+
+  SICK SOPAS Example Commissioning File for RFU620
+  Cybus Learn - How to connect and use a SICK RFID scanner via SOPAS
+  https://learn.cybus.io/lessons/how-to-connect-and-use-a-sick-rfid-scanner/
+  
+metadata:
+
+  name: SICK SOPAS Example
+  version: 1.0.0
+  icon: https://www.cybus.io/wp-content/uploads/2019/03/Cybus-logo-Claim-lang.svg
+  provider: cybus
+  homepage: https://www.cybus.io
+
+parameters:
+
+  IP_Address:
+    description: IP address of the SICK device
+    type: string
+    default: mySICKdevice
+
+  Port_Number:
+    description: Port on the SICK device. Usually 2111 or 2112.
+    type: number
+    default: 2112
+
+resources:
+
+  sopasConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Sopas
+      connection:
+        host: !ref IP_Address
+        port: !ref Port_Number
+
+  inventory:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Sopas
+      connection: !ref sopasConnection
+      subscribe:
+        name: QSinv
+        type: event
+
+  inventoryStart:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Sopas
+      connection: !ref sopasConnection
+      write:
+        name: MIStartIn
+        type: method
+
+  inventoryStop:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Sopas
+      connection: !ref sopasConnection
+      write:
+        name: MIStopIn
+        type: method
+
+  inventoryCheck:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Sopas
+      connection: !ref sopasConnection
+      read:
+        name: QSIsRn
+        type: variable
+
+  inventoryRunning:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Sopas
+      connection: !ref sopasConnection
+      subscribe:
+        name: QSIsRn
+        type: variable
+        
+  feedbackLight:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Sopas
+      connection: !ref sopasConnection
+      write:
+        name: HMISetFbLight
+        type: method
+
+  mapping:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+        - subscribe:
+            endpoint: !ref inventory
+          publish:
+            topic: 'sick/rfid/inventory'
+        - subscribe:
+            topic: 'sick/rfid/inventory/start'
+          publish:
+            endpoint: !ref inventoryStart
+        - subscribe:
+            topic: 'sick/rfid/inventory/stop'
+          publish:
+            endpoint: !ref inventoryStop
+        - subscribe:
+            topic: 'sick/rfid/inventory/check'
+          publish:
+            endpoint: !ref inventoryCheck
+        - subscribe:
+            endpoint: !ref inventoryRunning
+          publish:
+            topic: 'sick/rfid/inventory/running'
+        - subscribe:
+            topic: 'sick/rfid/light'
+          publish:
+            endpoint: !ref feedbackLight

@@ -1,0 +1,134 @@
+description: >
+  Supply chain visibility across warehouse, production, and logistics systems.
+  Integrates inventory levels, production status, and shipping data with array mapping.
+  Demonstrates enterprise integration patterns for end-to-end visibility.
+
+metadata:
+  name: Supply Chain Visibility - Multi-System Integration
+  version: 1.0.0
+
+parameters:
+  warehouseHost:
+    type: string
+    default: "192.168.30.100"
+    description: "Warehouse management system"
+    
+  erpSystemHost:
+    type: string
+    default: "192.168.40.100"
+    description: "ERP system connection"
+
+resources:
+  # Warehouse Management System Connection
+  warehouseConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref warehouseHost
+        port: 4840
+
+  # ERP System Connection (simulated via OPC UA)
+  erpConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref erpSystemHost
+        port: 4840
+
+  # Warehouse Inventory Levels
+  inventoryLevels:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref warehouseConnection
+      subscribe:
+        nodeId: ns=2;s=Inventory.RawMaterials.Count
+        interval: 60000
+      topic: supply-chain/warehouse/inventory-levels
+
+  # Production Status from Manufacturing
+  productionStatus:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref erpConnection
+      subscribe:
+        nodeId: ns=2;s=Production.Status.Current
+        interval: 30000
+      topic: supply-chain/production/current-status
+
+  # Logistics System Connection (HTTP REST API)
+  logisticsConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Http
+      connection:
+        host: "192.168.60.100"
+        port: 8080
+
+  # Shipping Status Endpoint  
+  shippingStatus:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Http
+      connection: !ref logisticsConnection
+      subscribe:
+        method: post
+        path: "/api/shipping/status"
+        interval: 60000
+      topic: supply-chain/logistics/shipping-status
+
+  # Supply Chain Coordination
+  supplyChainVisibility:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          # Mixed array: endpoint references AND topic strings
+          - endpoint: !ref inventoryLevels     # OPC UA endpoint reference
+            label: warehouse_inventory
+          - endpoint: !ref productionStatus    # OPC UA endpoint reference
+            label: production_line
+          - topic: ${Cybus::MqttRoot}/supply-chain/external/market-demand  # External MQTT topic
+            label: market_demand
+        publish:
+          topic: enterprise/supply-chain/visibility-dashboard
+        rules:
+        - collect: {}  # Combine all supply chain data
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "warehouse_data": $lookup($, 'warehouse_inventory'),
+                "production_data": $lookup($, 'production_line'),
+                "market_data": $lookup($, 'market_demand')
+              }
+
+# Example Input Data (mixed endpoint references and topics):
+#
+# From !ref inventoryLevels (OPC UA endpoint)
+# Payload: {"steel_coils": 250, "finished_parts": 1850, "last_updated": "2024-10-31T14:30:00Z"}
+#
+# From !ref productionStatus (OPC UA endpoint) 
+# Payload: {"status": "Running", "parts_per_hour": 65, "shift_target": 520, "wip_count": 45}
+#
+# From external MQTT topic: supply-chain/external/market-demand
+# Payload: {"weekly_forecast": 1850, "trend": "stable", "priority_orders": 12}
+#
+# After Collect Rule - All Supply Chain Data (endpoints + topics):
+# {
+#   "warehouse_inventory": {"steel_coils": 250, "finished_parts": 1850, "last_updated": "2024-10-31T14:30:00Z"},
+#   "production_line": {"status": "Running", "parts_per_hour": 65, "shift_target": 520, "wip_count": 45},
+#   "market_demand": {"weekly_forecast": 1850, "trend": "stable", "priority_orders": 12}
+# }
+#
+# Expected Output:
+# Topic: enterprise/supply-chain/visibility-dashboard
+# {
+#   "timestamp": 1730115600000,
+#   "warehouse_data": {"steel_coils": 250, "finished_parts": 1850, "last_updated": "2024-10-31T14:30:00Z"},
+#   "production_data": {"status": "Running", "parts_per_hour": 65, "shift_target": 520, "wip_count": 45},
+#   "market_data": {"weekly_forecast": 1850, "trend": "stable", "priority_orders": 12}
+# }

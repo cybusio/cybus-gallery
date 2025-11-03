@@ -1,0 +1,110 @@
+description: >
+  HVAC temperature conversion using transform calculations.
+  Converts Fahrenheit readings from legacy HVAC systems to Celsius and Kelvin
+  for modern facility management and energy optimization systems integration.
+
+metadata:
+  name: HVAC Temperature Conversion - Multi-Unit Calculations
+  version: 1.0.0
+
+parameters:
+  hvacControllerHost:
+    type: string
+    default: "192.168.110.50"
+    description: "BACnet/IP gateway for HVAC controllers"
+
+resources:
+  # BACnet/IP Connection for HVAC Systems  
+  hvacConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref hvacControllerHost
+        port: 4840
+
+  # Factory Floor HVAC Zone 1 - Legacy System
+  hvacZone1Temperatures:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref hvacConnection
+      subscribe:
+        nodeId: "ns=2;s=HVAC.Zone1.TemperatureController.Reading"
+        interval: 30000
+      topic: facility/hvac/zone-1/temperature/fahrenheit
+
+  # Factory Floor HVAC Zone 2 - Air Handling Unit
+  hvacZone2Temperatures:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref hvacConnection
+      subscribe:
+        nodeId: "ns=2;s=HVAC.Zone2.AirHandlingUnit.Temperature"
+        interval: 30000
+      topic: facility/hvac/zone-2/temperature/fahrenheit
+
+  # Office Area HVAC - Variable Air Volume System
+  officeHvacTemperatures:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref hvacConnection
+      subscribe:
+        nodeId: "ns=2;s=HVAC.Office.VAV.TemperatureSensor"
+        interval: 45000
+      topic: facility/hvac/office/temperature/fahrenheit
+
+  # Temperature Unit Conversion - Fahrenheit to Multiple Units
+  temperatureConversion:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/facility/hvac/+zone/temperature/fahrenheit
+        publish:
+          topic: 'facility/hvac/{zone}/temperature/converted'
+        rules:
+        - transform:
+            expression: |
+              {
+                /* Extract zone identifier from MQTT topic wildcard pattern */
+                "zone_id": $context.vars.zone,               /* Context variable from topic pattern {zone} */
+                
+                /* Keep original Fahrenheit reading */
+                "fahrenheit": $.temperature_f,               /* Original input field value */
+                
+                /* Convert Fahrenheit to Celsius using formula: (F - 32) × 5/9 */
+                "celsius": $round(($.temperature_f - 32) * 5/9, 2),    /* $round() limits to 2 decimal places */
+                
+                /* Convert Fahrenheit to Kelvin using formula: ((F - 32) × 5/9) + 273.15 */
+                "kelvin": $round((($.temperature_f - 32) * 5/9) + 273.15, 2),  /* Kelvin = Celsius + 273.15 */
+                
+                /* Check if temperature is in human comfort range (20-24°C) */
+                "is_comfortable": ($.temperature_f - 32) * 5/9 >= 20 and ($.temperature_f - 32) * 5/9 <= 24,  /* Boolean AND operation */
+                
+                /* Add timestamp for when conversion was performed */
+                "timestamp": $now()                          /* Current timestamp in milliseconds */
+              }
+
+# Example Input Message (from HVAC controller):
+#
+# Topic: facility/hvac/zone-1/temperature/fahrenheit  
+# Payload: {"temperature_f": 75.5}
+#
+# Expected Output:
+# Topic: facility/hvac/zone-1/temperature/converted
+# {
+#   "zone_id": "zone-1",
+#   "fahrenheit": 75.5,
+#   "celsius": 24.17,
+#   "kelvin": 297.32,
+#   "is_comfortable": false,
+#   "timestamp": 1730529600000
+# }
+
+# KEY CONCEPTS:
+# ✅ Mathematical calculations: Temperature conversion formulas
+# ✅ Function usage: $round() for decimal precision control
+# ✅ Boolean logic: Comfort range evaluation

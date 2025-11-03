@@ -1,0 +1,138 @@
+description: >
+  Production line status routing using wildcard patterns for line-specific monitoring.
+  Routes line status data to line-specific dashboard topics and creates shift reports
+  based on production line identification from topic structure.
+
+metadata:
+  name: Production Line Status Routing - Line-Specific Dashboards
+  version: 1.0.0
+
+parameters:
+  productionModbusHost:
+    type: string
+    default: "192.168.140.20"
+    description: "Modbus gateway for production line monitoring"
+
+resources:
+  # Production Line Monitoring Connection
+  productionConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Modbus
+      connection:
+        host: !ref productionModbusHost
+        port: 502
+
+  # Production Line A Status
+  lineAStatusEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref productionConnection
+      subscribe:
+        fc: 4
+        address: 100
+        length: 6
+        interval: 10000
+      topic: production/lines/line-a/status/current
+
+  # Production Line B Status
+  lineBStatusEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref productionConnection
+      subscribe:
+        fc: 4
+        address: 200
+        length: 6
+        interval: 10000
+      topic: production/lines/line-b/status/current
+
+  # Production Line C Status
+  lineCStatusEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref productionConnection
+      subscribe:
+        fc: 4
+        address: 300
+        length: 6
+        interval: 10000
+      topic: production/lines/line-c/status/current
+
+  # Line-Specific Dashboard Routing
+  lineDashboardRouting:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/production/lines/+line_id/status/current
+        publish:
+          topic: 'dashboards/production/{line_id}/shift-reports'
+        rules:
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "line_routing": {
+                  "line_id": $context.vars.line_id,
+                  "line_number": $substringAfter($context.vars.line_id, "line-"),
+                  "dashboard_topic": "dashboards/production/" & $context.vars.line_id & "/shift-reports"
+                },
+                "production_metrics": {
+                  "state": $[0] = 1 ? "running" : "stopped",
+                  "output_rate": $[1],
+                  "target_rate": $[2],
+                  "efficiency": $[1] / $[2] * 100,
+                  "oee": ($[0] = 1 ? 1 : 0) * ($[1] / $[2]) * ($[3] / 100)
+                },
+                "wildcard_routing": {
+                  "extracted_line": $context.vars.line_id,
+                  "topic_transformation": {
+                    "from": $context.topic,
+                    "to": "dashboards/production/" & $context.vars.line_id & "/shift-reports"
+                  }
+                },
+                "line_data": $
+              }
+
+# Example Input Messages (from different production lines):
+#
+# From Production Line A (Modbus):
+# Topic: production/lines/line-a/status/current
+# Payload: [1, 95, 100, 97]
+# Array interpretation:
+# [0] operational_state: 1 (running)
+# [1] current_output_rate: 95 units/hour
+# [2] target_output_rate: 100 units/hour  
+# [3] quality_pass_rate: 97%
+#
+# Wildcard Extraction: line_id = "line-a"
+#
+# Expected Output:
+# Topic: dashboards/production/line-a/shift-reports
+# {
+#   "timestamp": 1730529600000,
+#   "line_routing": {
+#     "line_id": "line-a",
+#     "line_number": "a", 
+#     "dashboard_topic": "dashboards/production/line-a/shift-reports"
+#   },
+#   "production_metrics": {
+#     "state": "running",
+#     "output_rate": 95,
+#     "target_rate": 100,
+#     "efficiency": 95,
+#     "oee": 0.9215  // 1 * 0.95 * 0.97
+#   },
+#   "wildcard_routing": {
+#     "extracted_line": "line-a",
+#     "topic_transformation": {
+#       "from": "production/lines/line-a/status/current",
+#       "to": "dashboards/production/line-a/shift-reports"
+#     }
+#   },
+#   "line_data": [1, 95, 100, 97]
+# }

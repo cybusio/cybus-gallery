@@ -1,0 +1,143 @@
+description: >
+  Quality control data processing and measurement standardization.
+  Transforms inspection results into standardized quality metrics
+  for quality management systems and statistical process control.
+
+metadata:
+  name: Quality Data Processing - Measurement Standardization
+  version: 1.0.0
+
+parameters:
+  qualitySystemHost:
+    type: string
+    default: "192.168.2.10"
+    description: "Quality inspection system"
+
+resources:
+  # Quality System Connection
+  qualityConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref qualitySystemHost
+        port: 4840
+
+  # Inspection Results Endpoint
+  inspectionResults:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref qualityConnection
+      subscribe:
+        nodeId: "ns=2;s=QualityStation.InspectionResults"
+        interval: 15000
+      topic: quality/inspection/raw-measurements
+
+  # Quality Data Processing
+  qualityDataProcessing:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/quality/inspection/raw-measurements
+        publish:
+          topic: quality/measurements/processed
+        rules:
+        - transform:
+            expression: |
+              {
+                /* Map part identifier */
+                "part_id": $.part_serial,                    /* Direct field mapping from input */
+                "inspection_station": "QS-001",              /* Static station identifier */
+                
+                /* Format measurements with appropriate precision */
+                "measurements": {
+                  "diameter_mm": $round($.diameter, 3),      /* Round to 3 decimal places for precision */
+                  "length_mm": $round($.length, 2),          /* Round to 2 decimal places */
+                  "surface_roughness": $round($.roughness, 1) /* Round to 1 decimal place */
+                },
+                
+                /* Evaluate each measurement against specifications */
+                "tolerances": {
+                  /* Diameter spec: 50.0mm ±0.1mm (49.9 to 50.1) */
+                  "diameter_within_spec": $.diameter >= 49.9 and $.diameter <= 50.1,  /* Boolean AND for range check */
+                  
+                  /* Length spec: 100.0mm ±0.5mm (99.5 to 100.5) */
+                  "length_within_spec": $.length >= 99.5 and $.length <= 100.5,       /* Boolean AND for range check */
+                  
+                  /* Surface roughness spec: ≤ 1.6 μm */
+                  "roughness_within_spec": $.roughness <= 1.6  /* Simple threshold check */
+                },
+                
+                /* Overall quality determination */
+                "quality_result": {
+                  /* Pass only if ALL measurements are within spec */
+                  "pass_fail": ($.diameter >= 49.9 and $.diameter <= 50.1) and 
+                              ($.length >= 99.5 and $.length <= 100.5) and 
+                              ($.roughness <= 1.6) ? "PASS" : "FAIL",  /* Triple AND condition */
+                  
+                  /* Build array of defect codes, filter out null values */
+                  "defect_codes": [
+                    $.diameter < 49.9 or $.diameter > 50.1 ? "DIM_DIAMETER" : null,    /* Diameter out of spec */
+                    $.length < 99.5 or $.length > 100.5 ? "DIM_LENGTH" : null,         /* Length out of spec */ 
+                    $.roughness > 1.6 ? "SURFACE_ROUGH" : null                         /* Roughness too high */
+                  ][$$ != null]                              /* Filter array: keep only non-null values */
+                },
+                
+                /* Calculate statistical process control metrics */
+                "statistics": {
+                  /* Process capability index: how well centered the process is */
+                  "cpk_diameter": $abs(50.0 - $.diameter) / (0.1 / 3),  /* Cpk = distance from center / (tolerance/6) */
+                  
+                  /* Deviation from nominal target */
+                  "deviation_length": $abs(100.0 - $.length)  /* Absolute deviation from 100.0mm target */
+                },
+                
+                /* Processing timestamp */
+                "timestamp": $now()                          /* Current timestamp when quality check performed */
+              }
+
+# Example Input Message:
+#
+# Topic: quality/inspection/raw-measurements
+# {
+#   "part_serial": "P240001-001",
+#   "diameter": 50.05,
+#   "length": 99.8,
+#   "roughness": 1.2,
+#   "operator": "OP-12"
+# }
+
+# Expected Output:
+# Topic: quality/measurements/processed
+# {
+#   "part_id": "P240001-001",
+#   "inspection_station": "QS-001",
+#   "measurements": {
+#     "diameter_mm": 50.05,
+#     "length_mm": 99.8,
+#     "surface_roughness": 1.2
+#   },
+#   "tolerances": {
+#     "diameter_within_spec": true,
+#     "length_within_spec": true,
+#     "roughness_within_spec": true
+#   },
+#   "quality_result": {
+#     "pass_fail": "PASS",
+#     "defect_codes": []
+#   },
+#   "statistics": {
+#     "cpk_diameter": 1.5,
+#     "deviation_length": 0.2
+#   },
+#   "timestamp": 1730529600000
+# }
+
+# KEY CONCEPTS:
+# ✅ Tolerance checking: Range validation for quality specifications
+# ✅ Conditional arrays: Building defect code lists based on failures  
+# ✅ Statistical calculations: Computing process capability metrics
+# ✅ Multi-condition logic: Complex pass/fail determination
+# ✅ Precision control: Using $round() for measurement accuracy

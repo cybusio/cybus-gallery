@@ -1,0 +1,202 @@
+description: >
+  Supply chain visibility across inventory, logistics, and supplier systems.
+  Demonstrates array subscription handling different protocols and topic depths.
+  Shows cross-facility coordination with heterogeneous data sources.
+
+metadata:
+  name: Supply Chain Visibility - Multi-Facility Tracking  
+  version: 1.0.0
+
+parameters:
+  warehouseModbusHost:
+    type: string
+    default: "192.168.110.60"
+    description: "Modbus gateway for supply chain sensors and systems"
+
+resources:
+  # Warehouse Sensors Connection
+  warehouseConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Modbus
+      connection:
+        host: !ref warehouseModbusHost
+        port: 502
+
+  # Raw Materials Inventory (Modbus Sensors)
+  rawMaterialsEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref warehouseConnection
+      subscribe:
+        fc: 4
+        address: 10
+        length: 3
+        interval: 60000
+      topic: inventory/materials/steel/level
+
+  # Finished Goods Inventory (Modbus Sensors)  
+  finishedGoodsEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref warehouseConnection
+      subscribe:
+        fc: 4
+        address: 50
+        length: 2
+        interval: 60000
+      topic: inventory/products/motors/level
+
+  # Warehouse A Storage Levels (Modbus)
+  warehouseAEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref warehouseConnection
+      subscribe:
+        fc: 4
+        address: 100
+        length: 2
+        interval: 30000
+      topic: logistics/warehouses/warehouse-a/storage
+
+  # Warehouse B Storage Levels (Modbus)
+  warehouseBEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref warehouseConnection
+      subscribe:
+        fc: 4
+        address: 200
+        length: 2
+        interval: 30000
+      topic: logistics/warehouses/warehouse-b/storage
+
+  # Supplier A Status (Modbus Gateway)
+  supplierAEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref warehouseConnection
+      subscribe:
+        fc: 4
+        address: 300
+        length: 4
+        interval: 120000
+      topic: suppliers/supplier-a/deliveries
+
+  # Supplier B Status (Modbus Gateway)
+  supplierBEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref warehouseConnection
+      subscribe:
+        fc: 4
+        address: 350
+        length: 4
+        interval: 120000
+      topic: suppliers/supplier-b/deliveries
+
+  # Multi-Facility Supply Chain Analytics
+  supplyChainAnalytics:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          # Array subscription - different topic structures across supply chain!
+          - topic: ${Cybus::MqttRoot}/inventory/materials/+material/level
+            label: 'inv_mat_{material}'
+          - topic: ${Cybus::MqttRoot}/inventory/products/+product/level
+            label: 'inv_prod_{product}'
+          - topic: ${Cybus::MqttRoot}/logistics/warehouses/+warehouse/storage
+            label: 'wh_{warehouse}'
+          - topic: ${Cybus::MqttRoot}/suppliers/+supplier/deliveries
+            label: 'supp_{supplier}'
+        publish:
+          topic: analytics/supply-chain/visibility-dashboard
+        rules:
+        - collect: {}  # Aggregate all supply chain data
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "triggered_by": $context.topic,
+                "supply_chain_overview": {
+                  "total_data_points": $count($keys($)),
+                  "raw_materials": $count($filter($keys($), function($k) { $contains($k, 'inv_mat_') })),
+                  "finished_products": $count($filter($keys($), function($k) { $contains($k, 'inv_prod_') })),
+                  "warehouse_locations": $count($filter($keys($), function($k) { $contains($k, 'wh_') })),
+                  "active_suppliers": $count($filter($keys($), function($k) { $contains($k, 'supp_') }))
+                },
+                "current_status": {
+                  "inventory_materials": $filter($, function($v, $k) { $contains($k, 'inv_mat_') }),
+                  "inventory_products": $filter($, function($v, $k) { $contains($k, 'inv_prod_') }),
+                  "warehouse_storage": $filter($, function($v, $k) { $contains($k, 'wh_') }),
+                  "supplier_deliveries": $filter($, function($v, $k) { $contains($k, 'supp_') })
+                },
+                "complete_supply_chain": $
+              }
+
+# Example Input Messages (from different supply chain systems):
+#
+# From Raw Materials Sensors (Modbus):
+# Topic: inventory/materials/steel/level
+# Payload: [2450, 1000, 85]  // [current_stock_kg, reorder_point_kg, storage_temp]
+#
+# From Finished Goods Sensors (Modbus):  
+# Topic: inventory/products/motors/level
+# Payload: [78, 50]  // [current_count, reorder_point]
+#
+# From Warehouse Storage (Modbus):
+# Topic: logistics/warehouses/warehouse-a/storage
+# Payload: [85, 92]  // [capacity_percentage, temperature]
+#
+# From Supplier Status (Modbus Gateway):
+# Topic: suppliers/supplier-a/deliveries  
+# Payload: [3, 8, 1, 0]  // [pending_deliveries, days_until_next, status_code, priority]
+#
+# After Collect Rule - All Supply Chain Data Aggregated:
+# {
+#   "inv_mat_steel": [2450, 1000, 85],
+#   "inv_prod_motors": [78, 50],
+#   "wh_warehouse-a": [85, 92],
+#   "supp_supplier-a": [3, 8, 1, 0]
+# }
+#
+# Expected Output (when supplier data arrives):
+# Topic: analytics/supply-chain/visibility-dashboard
+# {
+#   "timestamp": 1730529600000,
+#   "triggered_by": "suppliers/supplier-a/deliveries",
+#   "supply_chain_overview": {
+#     "total_data_points": 4,
+#     "raw_materials": 1,
+#     "finished_products": 1,
+#     "warehouse_locations": 1,
+#     "active_suppliers": 1
+#   },
+#   "current_status": {
+#     "inventory_materials": {
+#       "inv_mat_steel": [2450, 1000, 85]
+#     },
+#     "inventory_products": {
+#       "inv_prod_motors": [78, 50]
+#     },
+#     "warehouse_storage": {
+#       "wh_warehouse-a": [85, 92]
+#     },
+#     "supplier_deliveries": {
+#       "supp_supplier-a": [3, 8, 1, 0]
+#     }
+#   },
+#   "complete_supply_chain": {
+#     "inv_mat_steel": [2450, 1000, 85],
+#     "inv_prod_motors": [78, 50],
+#     "wh_warehouse-a": [85, 92],
+#     "supp_supplier-a": [3, 8, 1, 0]
+#   }
+# }

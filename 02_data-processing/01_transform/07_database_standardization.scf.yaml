@@ -1,0 +1,124 @@
+description: >
+  Database row standardization for ERP system integration.
+  Normalizes production data from legacy database format to modern ERP schema
+  with proper field mapping and data type conversions.
+
+metadata:
+  name: Database Row Standardization - ERP Integration
+  version: 1.0.0
+
+parameters:
+  databaseHost:
+    type: string
+    default: "192.168.1.100"
+    description: "Legacy production database server"
+
+resources:
+  # Database Connection (simulated via HTTP endpoint)
+  databaseConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Http
+      connection:
+        host: !ref databaseHost
+        port: 8080
+
+  # Legacy Production Data Endpoint
+  legacyProductionData:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Http
+      connection: !ref databaseConnection
+      subscribe:
+        method: post
+        path: "/api/production/rows"
+        interval: 30000
+      topic: database/production/legacy-rows
+
+  # Database Row Standardization
+  databaseStandardization:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/database/production/legacy-rows
+        publish:
+          topic: erp/production/standardized-records
+        rules:
+        - transform:
+            expression: |
+              {
+                /* Direct field mapping for simple ID */
+                "record_id": $.ID,                           /* Keep original database ID */
+                
+                /* Format work order with consistent padding */
+                "work_order": "WO-" + $pad($string($.WO_NUM), -6, "0"),  /* Convert to string, pad with zeros to 6 digits */
+                
+                /* Direct mapping for part number */
+                "part_number": $.PN,                         /* Part number as-is */
+                
+                /* Convert string quantities to numbers for calculations */
+                "quantity_produced": $number($.QTY_PROD),    /* $number() converts string "450" to number 450 */
+                "quantity_target": $number($.QTY_TARG),      /* $number() converts string "500" to number 500 */
+                
+                /* Calculate completion percentage from converted numbers */
+                "completion_rate": $round(($number($.QTY_PROD) / $number($.QTY_TARG)) * 100, 1),  /* Math: (450/500)*100 = 90.0 */
+                
+                /* Format operator ID with consistent padding */
+                "operator_id": "OP-" + $pad($.OPER_ID, -3, "0"),  /* Pad operator ID "23" to "023" */
+                
+                /* Map shift codes to descriptive names using nested ternary */
+                "shift_code": $.SHIFT = "1" ? "DAY" : $.SHIFT = "2" ? "EVENING" : "NIGHT",  /* Multiple conditions: 1→DAY, 2→EVENING, other→NIGHT */
+                
+                /* Convert date string to timestamp format */
+                "production_date": $toMillis($.PROD_DT, "[Y0001]-[M01]-[D01]"),  /* Parse "2024-11-01" to milliseconds timestamp */
+                
+                /* Format machine center with prefix */
+                "machine_center": "MC-" + $.MC_ID,           /* Prepend "MC-" to machine ID */
+                
+                /* Map status codes to full descriptions */
+                "status": $.STAT = "C" ? "completed" : $.STAT = "P" ? "in_progress" : "pending",  /* C→completed, P→in_progress, other→pending */
+                
+                /* Add processing timestamp */
+                "timestamp": $now()                          /* Current timestamp when standardization occurred */
+              }
+
+# Example Input Message (Legacy Database Row):
+#
+# Topic: database/production/legacy-rows
+# {
+#   "ID": 12345,
+#   "WO_NUM": 987,
+#   "PN": "PART-ABC-001",
+#   "QTY_PROD": "450",
+#   "QTY_TARG": "500", 
+#   "OPER_ID": "23",
+#   "SHIFT": "1",
+#   "PROD_DT": "2024-11-01",
+#   "MC_ID": "CNC001",
+#   "STAT": "P"
+# }
+
+# Expected Output:
+# Topic: erp/production/standardized-records
+# {
+#   "record_id": 12345,
+#   "work_order": "WO-000987",
+#   "part_number": "PART-ABC-001",
+#   "quantity_produced": 450,
+#   "quantity_target": 500,
+#   "completion_rate": 90.0,
+#   "operator_id": "OP-023",
+#   "shift_code": "DAY",
+#   "production_date": 1730419200000,
+#   "machine_center": "MC-CNC001",
+#   "status": "in_progress",
+#   "timestamp": 1730529600000
+# }
+
+# KEY CONCEPTS:
+# ✅ Data type conversion: $number() to convert strings to numbers
+# ✅ String formatting: $pad() for consistent ID formats
+# ✅ Date conversion: $toMillis() for timestamp standardization
+# ✅ Calculated fields: Computing completion rates from raw data
+# ✅ Value mapping: Converting codes to descriptive text

@@ -1,0 +1,228 @@
+description: >
+  Manufacturing integration across production, quality, and maintenance systems.
+  Uses array subscription to handle different topic structures from incompatible systems.
+  Demonstrates cross-domain analytics with dynamic labels for unified monitoring.
+
+metadata:
+  name: Manufacturing Integration - Multi-System Analytics
+  version: 1.0.0
+
+parameters:
+  opcuaProductionHost:
+    type: string
+    default: "192.168.100.10"
+    description: "OPC UA server for production system"
+    
+  opcuaQualityHost:
+    type: string
+    default: "192.168.100.20"
+    description: "OPC UA server for quality management"
+    
+  opcuaMaintenanceHost:
+    type: string
+    default: "192.168.100.30"
+    description: "OPC UA server for maintenance planning"
+
+resources:
+  # Production System Connection
+  productionConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref opcuaProductionHost
+        port: 4840
+        
+  # Quality Management Connection
+  qualityConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref opcuaQualityHost
+        port: 4840
+        
+  # Maintenance Planning Connection
+  maintenanceConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref opcuaMaintenanceHost
+
+  # =============================================================================
+  # ARRAY OF TOPICS + WILDCARD COLLECT SCALABILITY
+  # =============================================================================
+  # This SCF demonstrates array subscriptions with INCOMPATIBLE topic structures
+  # from different manufacturing systems. Each system uses different naming conventions
+  # but the array subscription handles the heterogeneity with dynamic labels.
+  #
+  # CURRENT SYSTEM INTEGRATION:
+  # - Production System: production/line-{id}/efficiency/current
+  # - Quality System: quality/inspection/{station}/results  
+  # - Maintenance System: maintenance/equipment/{asset}/health-status
+  #
+  # ENTERPRISE INTEGRATION SCENARIOS - Add more manufacturing systems:
+  # - ERP System: erp/orders/{order-id}/status (SAP, Oracle, NetSuite)
+  # - WMS System: warehouse/{zone}/inventory/levels (Warehouse management)
+  # - Energy System: energy/{building}/consumption/realtime (Energy monitoring)
+  # - Safety System: safety/{area}/incidents/alerts (Safety compliance)
+  # - HR System: personnel/{shift}/attendance/status (Workforce management)
+  # - Environmental: environmental/{sensor}/readings/current (Environmental monitoring)
+  #
+  # Array subscription + dynamic labels enable UNIFIED ANALYTICS across
+  # incompatible legacy systems without individual topic normalization!
+  # =============================================================================
+        port: 4840
+
+  # Production Line A Status
+  productionLineAEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref productionConnection
+      subscribe:
+        nodeId: "ns=2;s=ProductionLines.LineA.Status"
+        interval: 5000
+      topic: production/lines/line-a/status
+
+  # Production Line B Status  
+  productionLineBEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref productionConnection
+      subscribe:
+        nodeId: "ns=2;s=ProductionLines.LineB.Status"
+        interval: 5000
+      topic: production/lines/line-b/status
+
+  # Quality Inspection Results
+  qualityBatch001Endpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref qualityConnection
+      subscribe:
+        nodeId: "ns=3;s=QualityControl.Batch001.Results"
+        interval: 10000
+      topic: quality/batches/batch-001/results
+
+  # Quality Inspection Results
+  qualityBatch002Endpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref qualityConnection
+      subscribe:
+        nodeId: "ns=3;s=QualityControl.Batch002.Results"
+        interval: 10000
+      topic: quality/batches/batch-002/results
+
+  # Maintenance Schedule Updates
+  maintenanceRobot001Endpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref maintenanceConnection
+      subscribe:
+        nodeId: "ns=4;s=Maintenance.Robot001.Schedule"
+        interval: 30000
+      topic: maintenance/equipment/robot-001/schedule
+
+  # Maintenance Schedule Updates
+  maintenancePump005Endpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref maintenanceConnection
+      subscribe:
+        nodeId: "ns=4;s=Maintenance.Pump005.Schedule"
+        interval: 30000
+      topic: maintenance/equipment/pump-005/schedule
+
+  # Multi-System Manufacturing Integration
+  manufacturingIntegration:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          # Array subscription - different topic structures from different systems!
+          - topic: ${Cybus::MqttRoot}/production/lines/+line/status
+            label: 'prod_{line}'
+          - topic: ${Cybus::MqttRoot}/quality/batches/+batch/results
+            label: 'quality_{batch}'
+          - topic: ${Cybus::MqttRoot}/maintenance/equipment/+equipment/schedule
+            label: 'maint_{equipment}'
+        publish:
+          topic: analytics/manufacturing/integration-summary
+        rules:
+        - collect: {}  # Aggregate all manufacturing system data
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "triggered_by": $context.topic,
+                "system_overview": {
+                  "total_data_points": $count($keys($)),
+                  "production_lines": $count($filter($keys($), function($k) { $contains($k, 'prod_') })),
+                  "quality_batches": $count($filter($keys($), function($k) { $contains($k, 'quality_') })),
+                  "maintenance_items": $count($filter($keys($), function($k) { $contains($k, 'maint_') }))
+                },
+                "current_status": {
+                  "production_data": $filter($, function($v, $k) { $contains($k, 'prod_') }),
+                  "quality_data": $filter($, function($v, $k) { $contains($k, 'quality_') }),
+                  "maintenance_data": $filter($, function($v, $k) { $contains($k, 'maint_') })
+                },
+                "all_systems_data": $
+              }
+
+# Example Input Messages (from different manufacturing systems):
+#
+# From Production System (OPC UA):
+# Topic: production/lines/line-a/status
+# Payload: {"status": "running", "oee": 0.85, "output_rate": 120, "efficiency": 0.92}
+#
+# From Quality System (OPC UA):
+# Topic: quality/batches/batch-001/results  
+# Payload: {"batch_id": "batch-001", "tests_passed": 45, "tests_failed": 2, "quality_score": 95.7}
+#
+# From Maintenance System (OPC UA):
+# Topic: maintenance/equipment/robot-001/schedule
+# Payload: {"equipment": "robot-001", "next_maintenance": "2024-11-15", "hours_until": 168, "priority": "medium"}
+#
+# After Collect Rule - All Systems Aggregated:
+# {
+#   "prod_line-a": {"status": "running", "oee": 0.85, "output_rate": 120, "efficiency": 0.92},
+#   "quality_batch-001": {"batch_id": "batch-001", "tests_passed": 45, "tests_failed": 2, "quality_score": 95.7},
+#   "maint_robot-001": {"equipment": "robot-001", "next_maintenance": "2024-11-15", "hours_until": 168, "priority": "medium"}
+# }
+#
+# Expected Output (when maintenance data arrives):
+# Topic: analytics/manufacturing/integration-summary
+# {
+#   "timestamp": 1730529600000,
+#   "triggered_by": "maintenance/equipment/robot-001/schedule",
+#   "system_overview": {
+#     "total_data_points": 3,
+#     "production_lines": 1,
+#     "quality_batches": 1,  
+#     "maintenance_items": 1
+#   },
+#   "current_status": {
+#     "production_data": {
+#       "prod_line-a": {"status": "running", "oee": 0.85, "output_rate": 120, "efficiency": 0.92}
+#     },
+#     "quality_data": {
+#       "quality_batch-001": {"batch_id": "batch-001", "tests_passed": 45, "tests_failed": 2, "quality_score": 95.7}
+#     },
+#     "maintenance_data": {
+#       "maint_robot-001": {"equipment": "robot-001", "next_maintenance": "2024-11-15", "hours_until": 168, "priority": "medium"}
+#     }
+#   },
+#   "all_systems_data": {
+#     "prod_line-a": {"status": "running", "oee": 0.85, "output_rate": 120, "efficiency": 0.92},
+#     "quality_batch-001": {"batch_id": "batch-001", "tests_passed": 45, "tests_failed": 2, "quality_score": 95.7},
+#     "maint_robot-001": {"equipment": "robot-001", "next_maintenance": "2024-11-15", "hours_until": 168, "priority": "medium"}
+#   }
+# }

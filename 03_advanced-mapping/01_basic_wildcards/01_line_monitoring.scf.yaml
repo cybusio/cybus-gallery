@@ -1,0 +1,148 @@
+description: >
+  Real-world manufacturing line monitoring scenario.
+  Connect multiple CNC machines on production line A via OPC UA and aggregate their status.
+  Demonstrates single-level wildcards with context variables for machine identification.
+
+metadata:
+  name: Line A Machine Monitoring - CNC Status Aggregation
+  version: 1.0.0
+  
+parameters:
+  opcuaServer:
+    type: string
+    default: "opc.tcp://factory-opcua-server:4840"
+    description: "OPC UA server endpoint for production line A"
+
+resources:
+  # OPC UA Connection to Factory Server
+  factoryOpcUaConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref opcuaServer
+        port: 4840
+        username: "factory_user"
+        password: "secure_password"
+
+  # =============================================================================
+  # WILDCARD SCALABILITY DEMONSTRATION
+  # =============================================================================
+  # The following endpoints demonstrate how wildcards enable scalable monitoring.
+  # Each endpoint follows the pattern: factory/production/line-A/{machine-id}/status
+  # 
+  # The wildcard subscription: factory/production/line-A/+machine/status
+  # automatically captures ALL machines without individual mapping configuration.
+  #
+  # REAL-WORLD SCALABILITY: You could easily add more machines by creating 
+  # additional endpoints with the same topic pattern:
+  # - factory/production/line-A/cnc-004/status (4th CNC Machine)
+  # - factory/production/line-A/cnc-005/status (5th CNC Machine)  
+  # - factory/production/line-A/lathe-001/status (Lathe Machine)
+  # - factory/production/line-A/mill-001/status (Milling Machine)
+  # - factory/production/line-A/robot-002/status (2nd Robot Cell)
+  #
+  # ALL would be automatically captured by the existing wildcard mapping!
+  # =============================================================================
+
+  # CNC Machine 1 - Mazak Integrex
+  cncMachine001:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref factoryOpcUaConnection
+      subscribe:
+        nodeId: "ns=2;s=LineA.CNC001.Status"
+        samplingInterval: 1000
+      topic: factory/production/line-A/cnc-001/status
+
+  # CNC Machine 2 - DMG Mori Ultrasonic  
+  cncMachine002:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref factoryOpcUaConnection
+      subscribe:
+        nodeId: "ns=2;s=LineA.CNC002.Status"
+        samplingInterval: 1000
+      topic: factory/production/line-A/cnc-002/status
+
+  # CNC Machine 3 - HAAS VF-2
+  cncMachine003:
+    type: Cybus::Endpoint  
+    properties:
+      protocol: Opcua
+      connection: !ref factoryOpcUaConnection
+      subscribe:
+        nodeId: "ns=2;s=LineA.CNC003.Status" 
+        samplingInterval: 1000
+      topic: factory/production/line-A/cnc-003/status
+
+  # Robot Cell - KUKA KR 10
+  robotCell001:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref factoryOpcUaConnection
+      subscribe:
+        nodeId: "ns=2;s=LineA.Robot001.Status"
+        samplingInterval: 1000
+      topic: factory/production/line-A/robot-001/status
+
+  # Line A Machine Status Aggregation
+  lineAMachineMonitoring:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          # Wildcard pattern matches ALL machines on line-A
+          # Matches: ${Cybus::MqttRoot}/factory/production/line-A/cnc-001/status
+          #          ${Cybus::MqttRoot}/factory/production/line-A/cnc-002/status
+          #          ${Cybus::MqttRoot}/factory/production/line-A/robot-001/status
+          topic: ${Cybus::MqttRoot}/factory/production/line-A/+machine/status
+        publish:
+          topic: analytics/line-a/machine-status
+        rules:
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "machine_id": $context.vars.machine,
+                "status": $.machineState,
+                "parts_count": $.totalParts,
+                "location": "line-A/" & $context.vars.machine
+              }
+
+# Example Input Messages (from OPC UA endpoints):
+#
+# Topic: factory/production/line-A/cnc-001/status
+# Payload: {
+#   "machineState": "RUNNING",
+#   "mode": "AUTOMATIC", 
+#   "totalParts": 1247,
+#   "activeProgramName": "PART_ABC_V2.1",
+#   "spindleLoad": 65.2,
+#   "currentFeedrate": 1250,
+#   "alarmCount": 0
+# }
+#
+# Topic: factory/production/line-A/robot-001/status  
+# Payload: {
+#   "machineState": "IDLE",
+#   "mode": "MANUAL",
+#   "totalParts": 1247,
+#   "activeProgramName": "PICK_PLACE_V1.3", 
+#   "spindleLoad": 0,
+#   "currentFeedrate": 0,
+#   "alarmCount": 1
+# }
+#
+# Expected Output:
+# Topic: analytics/line-a/machine-status
+# Payload: {
+#   "timestamp": 1730115600000,
+#   "machine_id": "cnc-001", 
+#   "status": "RUNNING",
+#   "parts_count": 1247,
+#   "location": "line-A/cnc-001"
+# }

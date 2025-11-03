@@ -1,0 +1,244 @@
+description: !sub 'Atlas Copco Open Protocol Connector for device ${atlasCopcoDeviceId}'
+
+metadata:
+
+  name: Open Protocol Connector
+
+parameters:
+
+  atlasCopcoAgentName:
+    type: string
+    description: The protocol-mapper agent name where our openprotocol/atlascopco connector is running
+    default: openprotocol
+
+  atlasCopcoDeviceId:
+    type: string
+    description: ID or name of the Atlas Copco Device
+    default: myPowerFocus6000
+
+  atlasCopcoDeviceHost:
+    type: string
+    description: IP or hostname of the Atlas Copco device
+
+  atlasCopcoDevicePort:
+    type: integer
+    description: Port of the Atlas Copco device
+    default: 4545
+
+resources:
+
+  openProtocolConnection:
+    type: Cybus::Connection
+    properties:
+      agentName: !ref atlasCopcoAgentName
+      protocol: Openprotocol
+      connection:
+        host: !ref atlasCopcoDeviceHost
+        port: !ref atlasCopcoDevicePort
+
+  psetSelected:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: psetSelected
+      subscribe:
+        midGroup: psetSelected
+
+  lockAtBatchDoneUpload:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: lockAtBatchDoneUpload
+      subscribe:
+        midGroup: lockAtBatchDoneUpload
+
+  jobInfo:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: jobInfo
+      subscribe:
+        midGroup: jobInfo
+
+  vin:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: vin
+      subscribe:
+        midGroup: vin
+
+  lastTightening:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: lastTightening
+      subscribe:
+        midGroup: lastTightening
+
+  alarm:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: alarm
+      subscribe:
+        midGroup: alarm
+
+  alarmStatus:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: alarmStatus
+      subscribe:
+        midGroup: alarmStatus
+
+  alarmAcknowledged:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: alarmAcknowledged
+      subscribe:
+        midGroup: alarmAcknowledged
+
+  multiSpindleStatus:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: multiSpindleStatus
+      subscribe:
+        midGroup: multiSpindleStatus
+
+  multiSpindleResult:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: multiSpindleResult
+      subscribe:
+        midGroup: multiSpindleResult
+
+  lastPowerMACSTighteningResultStationData:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: lastPowerMACSTighteningResultStationData
+      subscribe:
+        midGroup: lastPowerMACSTighteningResultStationData
+
+  jobLineControl:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: jobLineControl
+      subscribe:
+        midGroup: jobLineControl
+
+  multipleIdentifierResultParts:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: multipleIdentifierResultParts
+      subscribe:
+        midGroup: multipleIdentifierResultParts
+
+  statusExternallyMonitoredInputs:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: statusExternallyMonitoredInputs
+      subscribe:
+        midGroup: statusExternallyMonitoredInputs
+
+  relayFunction:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: relayFunction
+      subscribe:
+        midGroup: relayFunction
+
+  digitalInputFunction:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: digitalInputFunction
+      subscribe:
+        midGroup: digitalInputFunction
+
+  userData:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: userData
+      subscribe:
+        midGroup: userData
+
+  selectorSocketInfo:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: selectorSocketInfo
+      subscribe:
+        midGroup: selectorSocketInfo
+
+  toolTagID:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: toolTagID
+      subscribe:
+        midGroup: toolTagID
+
+  automaticManualMode:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: automaticManualMode
+      subscribe:
+        midGroup: automaticManualMode
+
+  openProtocolCommandsDisabled:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: openProtocolCommandsDisabled
+      subscribe:
+        midGroup: openProtocolCommandsDisabled
+
+  motorTuningResultData:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Openprotocol
+      connection: !ref openProtocolConnection
+      topic: motorTuningResultData
+      subscribe:
+        midGroup: motorTuningResultData
+
+  # this extends the defaultRole with more permissions!
+  defaultRole:
+    type: Cybus::Role
+    properties:
+      permissions:
+        - resource: '#'
+          operation: readWrite
+          context: mqtt

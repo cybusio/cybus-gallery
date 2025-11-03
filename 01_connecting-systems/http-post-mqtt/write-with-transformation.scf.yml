@@ -1,0 +1,102 @@
+description: >
+  HTTP write with input format transformation.
+  Shows converting standard manufacturing commands to HTTP API calls
+  for controlling web-enabled devices and systems.
+
+metadata:
+  name: HTTP Write with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  apiHost:
+    type: string
+    default: "192.168.1.100"
+
+resources:
+  httpConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Http
+      connection:
+        host: !ref apiHost
+        port: 8080
+
+  # Send machine control commands
+  machineControlWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Http
+      connection: !ref httpConnection
+      write:
+        method: "post"
+        path: "/api/v1/machine/control"
+      topic: http/machine/control/write
+
+  # Send setpoint commands
+  setpointWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Http
+      connection: !ref httpConnection
+      write:
+        method: "post"
+        path: "/api/v1/setpoint"
+      topic: http/setpoint/write
+
+  # Transform standard input to HTTP API formats
+  commandTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert machine control to HTTP API format
+      - subscribe:
+          topic: manufacturing/machine/control
+        publish:
+          endpoint: !ref machineControlWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert machine command to HTTP API format */
+              /* Input: {"action": "start", "mode": "auto"} */
+              /* Output: HTTP API payload */
+              {
+                "command": $.action,
+                "mode": $.mode,
+                "timestamp": $now()
+              }
+
+      # Convert setpoint to HTTP API format
+      - subscribe:
+          topic: manufacturing/temperature/setpoint
+        publish:
+          endpoint: !ref setpointWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert setpoint to HTTP API format */
+              /* Input: {"temperature_celsius": 25.0, "zone": "oven"} */
+              /* Output: HTTP API payload */
+              {
+                "setpoint": $.temperature_celsius,
+                "zone": $.zone,
+                "unit": "celsius"
+              }
+
+# Input Format Examples:
+#
+# 1. Machine Control:
+#    Input: {"action": "start", "mode": "auto"}
+#    HTTP API Output: {"command": "start", "mode": "auto", "timestamp": "2024-..."}
+#
+# 2. Temperature Setpoint:
+#    Input: {"temperature_celsius": 25.0, "zone": "oven"}
+#    HTTP API Output: {"setpoint": 25.0, "zone": "oven", "unit": "celsius"}
+
+# Key Concepts:
+# ✅ REST API Calls: Converting to HTTP POST requests
+# ✅ JSON Payload: Creating structured API request bodies
+# ✅ Standard Topics: Manufacturing topics → API endpoints
+# ✅ Simple Mapping: Direct field mapping with additional context

@@ -1,0 +1,140 @@
+description: >
+  Production quality alert routing based on inspection results and defect severity.
+  Uses setContextVars to dynamically route quality alerts to department-specific topics
+  based on product type, defect severity, and production line information.
+
+metadata:
+  name: Quality Alert Routing - Department-Specific Notifications
+  version: 1.0.0
+
+parameters:
+  qualityOpcuaHost:
+    type: string
+    default: "192.168.130.10"
+    description: "OPC UA server for quality inspection system"
+
+resources:
+  # Quality Management System Connection
+  qualityConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref qualityOpcuaHost
+        port: 4840
+
+  # =============================================================================
+  # DYNAMIC PUBLISH TOPIC SCALABILITY WITH SETCONTEXTVARS
+  # =============================================================================
+  # This SCF demonstrates content-based dynamic routing using setContextVars.
+  # Multiple endpoints can publish to the same topic, and routing decisions
+  # are made based on message payload content rather than topic structure.
+  #
+  # CONTENT-BASED ROUTING: Single topic → Multiple dynamic destinations
+  # topic: quality/inspection/results → alerts/quality/{department}/{severity}/notifications
+  #
+  # CURRENT ENDPOINT: Single quality inspection station
+  # - quality/inspection/results (Station 1)
+  #
+  # SCALABILITY EXAMPLES - Multiple endpoints can use the same topic:
+  # - qualityStation2Endpoint: topic: quality/inspection/results (Station 2) 
+  # - qualityStation3Endpoint: topic: quality/inspection/results (Station 3)
+  # - inlineQualityEndpoint: topic: quality/inspection/results (Inline inspection)
+  # - finalQualityEndpoint: topic: quality/inspection/results (Final inspection)
+  # - supplierQualityEndpoint: topic: quality/inspection/results (Supplier QC)
+  # - labTestEndpoint: topic: quality/inspection/results (Lab testing)
+  #
+  # ALL endpoints use the SAME setContextVars logic for department/severity routing:
+  # - Automotive products → automotive-qc department
+  # - Aerospace products → aerospace-qc department  
+  # - High defects → critical/high severity alerts
+  # - Low defects → medium/low severity alerts
+  # =============================================================================
+
+  # Quality Inspection Results Endpoint
+  qualityInspectionEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref qualityConnection
+      subscribe:
+        nodeId: "ns=3;s=QualityControl.InspectionResults"
+        interval: 5000
+      topic: quality/inspection/results
+
+  # Quality Alert Routing Based on Inspection Results
+  qualityAlertRouting:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/quality/inspection/results
+        publish:
+          topic: 'alerts/quality/{department}/{severity}/notifications'
+        rules:
+        - setContextVars:
+            vars:
+              department: |
+                $.product.category = "automotive" ? "automotive-qc" :
+                $.product.category = "aerospace" ? "aerospace-qc" :
+                "general-qc"
+              severity: |
+                $.inspection.defect_count > 5 ? "critical" :
+                $.inspection.defect_count > 2 ? "high" :
+                $.inspection.defect_count > 0 ? "medium" : "low"
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "dynamic_routing": {
+                  "department": $context.vars.department,
+                  "severity": $context.vars.severity,
+                  "final_topic": "alerts/quality/" & $context.vars.department & "/" & $context.vars.severity & "/notifications"
+                },
+                "quality_data": {
+                  "product_category": $.product.category,
+                  "defect_count": $.inspection.defect_count,
+                  "pass_rate": $.inspection.pass_rate
+                },
+                "setContextVars_logic": {
+                  "department_logic": "product.category='" & $.product.category & "' → " & $context.vars.department,
+                  "severity_logic": "defect_count=" & $.inspection.defect_count & " → " & $context.vars.severity
+                },
+              }
+
+# Example Input Message (from quality inspection system):
+#
+# Topic: quality/inspection/results
+# Payload: {
+#   "product": {
+#     "category": "automotive"
+#   },
+#   "inspection": {
+#     "defect_count": 3,
+#     "pass_rate": 0.94
+#   }
+# }
+#
+# SetContextVars Logic:
+# - department = "automotive-qc" (product.category = "automotive")
+# - severity = "high" (defect_count = 3, which is > 2)
+#
+# Expected Output:
+# Topic: alerts/quality/automotive-qc/high/notifications
+# {
+#   "timestamp": 1730529600000,
+#   "dynamic_routing": {
+#     "department": "automotive-qc",
+#     "severity": "high",
+#     "final_topic": "alerts/quality/automotive-qc/high/notifications"
+#   },
+#   "quality_data": {
+#     "product_category": "automotive",
+#     "defect_count": 3,
+#     "pass_rate": 0.94
+#   },
+#   "setContextVars_logic": {
+#     "department_logic": "product.category='automotive' → automotive-qc",
+#     "severity_logic": "defect_count=3 → high"
+#   },
+# }

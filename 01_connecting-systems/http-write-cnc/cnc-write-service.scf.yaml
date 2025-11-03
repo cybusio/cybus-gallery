@@ -1,0 +1,79 @@
+description: >
+  HTTP to CNC bridge service that receives commands via HTTP POST requests
+  and sends them to CNC machines using FOCAS protocol.
+
+metadata:
+  name: HTTP to CNC Write Bridge
+
+resources:
+  # HTTP server for receiving CNC commands
+  httpServer:
+    type: Cybus::Server
+    properties:
+      type: Cybus::Server::Http
+      properties:
+        basePath: /cnc
+
+  # Single HTTP endpoint for all CNC operations
+  # Accepts POST requests at: https://your-connectware.com/cnc/api/write
+  # Content-Type: application/json
+  cncEndpoint:
+    type: Cybus::Node
+    properties:
+      protocol: Http
+      parent: !ref httpServer
+      method: POST
+      route: /write
+
+  # FOCAS connection to CNC machine
+  # Configure your FANUC CNC machine network settings:
+  # - host: IP address of your CNC machine (e.g., 192.168.1.100)
+  # - port: FOCAS protocol port (default: 8193)
+  cncConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Focas
+      connection:
+        host: <!-- Specify CNC machine IP address here -->
+        port: 8193
+
+  # Single CNC write endpoint
+  # Writes data to FOCAS address: /NC/Channel/ChannelDiagnose/progName
+  # This address typically controls the active program name on FANUC CNCs
+  cncWriteEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Focas
+      connection: !ref cncConnection
+      read:
+        method: none
+        
+
+  # Simple mapping: HTTP POST data → CNC write with JSONata transformation
+  httpToCncMapping:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          endpoint: !ref cncEndpoint
+        publish:
+          endpoint: !ref cncWriteEndpoint
+        rules:
+        # JSONata transform to create array structure for FOCAS protocol
+        # 
+        # Expected HTTP POST input examples:
+        # 1. {"data": "O1001"}           -> Extracts "O1001"
+        # 2. {"data": "M30"}             -> Extracts "M30" 
+        - transform:
+            expression: |
+              [
+                {
+                  "value": $string(data ? data : value)
+                }
+              ]
+              
+        # Output format for FOCAS:
+        # [
+        # { 
+        #   "value": "extracted_string_value"
+        # }

@@ -1,0 +1,136 @@
+description: >
+  EtherNet/IP read with real-world transformation scenarios.
+  Shows converting Allen-Bradley PLC tag values to standardized industrial data
+  from Rockwell Automation systems and CIP-enabled devices.
+
+metadata:
+  name: EtherNet/IP Read with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  plcHost:
+    type: string
+    default: "192.168.1.60"
+
+resources:
+  ethernetipConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: EthernetIp
+      connection:
+        host: !ref plcHost
+
+  # Read machine status tags
+  machineStatusRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: EthernetIp
+      connection: !ref ethernetipConnection
+      subscribe:
+        tagName: "MachineStatus"
+        programName: "MainProgram"
+      topic: ethernetip/machine/status/raw
+
+  # Read production counter tags
+  productionCounterRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: EthernetIp
+      connection: !ref ethernetipConnection
+      subscribe:
+        tagName: "ProductionCounter"
+        programName: "MainProgram"
+      topic: ethernetip/production/counter/raw
+
+  # Read temperature tags
+  temperatureRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: EthernetIp
+      connection: !ref ethernetipConnection
+      subscribe:
+        tagName: "Temperature_PV"
+        programName: "MainProgram"
+      topic: ethernetip/temperature/raw
+
+  # Transform EtherNet/IP data to standard manufacturing format
+  ethernetipDataTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert Allen-Bradley machine status to standard format
+      - subscribe:
+          endpoint: !ref machineStatusRead
+        publish:
+          topic: manufacturing/machine/status
+        rules:
+        - transform:
+            expression: |
+              {
+                "machine_id": "AB_PLC_001",
+                "running": $.Running,
+                "fault": $.Fault,
+                "emergency_stop": $.EStop,
+                "auto_mode": $.AutoMode,
+                "timestamp": $now()
+              }
+
+      # Convert production counter from Allen-Bradley DINT
+      - subscribe:
+          endpoint: !ref productionCounterRead
+        publish:
+          topic: manufacturing/production/count
+        rules:
+        - transform:
+            expression: |
+              {
+                "line_id": "PRODUCTION_LINE_001",
+                "total_parts": $,
+                "timestamp": $now()
+              }
+
+      # Convert temperature from Allen-Bradley REAL
+      - subscribe:
+          endpoint: !ref temperatureRead
+        publish:
+          topic: manufacturing/temperature/reading
+        rules:
+        - transform:
+            expression: |
+              {
+                "sensor_id": "TEMP_001",
+                "temperature_celsius": $,
+                "timestamp": $now()
+              }
+
+# Simple Real-World Examples:
+#
+# 1. Machine Status: {"Running": true, "Fault": false, "EStop": false, "AutoMode": true}
+#    → {"running": true, "fault": false, "emergency_stop": false, "auto_mode": true}
+#
+# 2. Production Counter: 2547
+#    → {"total_parts": 2547}
+#
+# 3. Temperature: 25.5
+#    → {"temperature_celsius": 25.5}
+
+# Real-World Transformation Examples:
+#
+# 1. Machine Status: {"Running": true, "Fault": false, "EStop": false, "AutoMode": true, "DoorClosed": true}
+#    → {"running": true, "status": "running", "system_ready": true, "auto_mode": true}
+#
+# 2. Production Counter: 2547
+#    → {"total_parts": 2547, "parts_this_shift": 547, "counter_valid": true, "milestone_reached": false}
+#
+# 3. Temperature: 25.5
+#    → {"temperature_celsius": 25.5, "temperature_fahrenheit": 77.9, "temperature_valid": true, "alarm_high": false}
+
+# Key Concepts:
+# ✅ Allen-Bradley Tags: Reading named tags from Rockwell PLCs
+# ✅ CIP Data Types: Processing BOOL, DINT, REAL data types
+# ✅ Status Logic: Converting PLC boolean logic to readable status
+# ✅ Data Validation: Range checking and alarm conditions
+# ✅ Simple Calculations: Basic math operations on tag values

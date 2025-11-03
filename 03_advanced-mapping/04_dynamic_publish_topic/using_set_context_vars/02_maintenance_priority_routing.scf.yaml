@@ -1,0 +1,112 @@
+description: >
+  Equipment maintenance routing based on condition monitoring data and criticality.
+  Uses setContextVars to dynamically route maintenance alerts to appropriate teams
+  based on equipment type, condition severity, and operational impact.
+
+metadata:
+  name: Maintenance Priority Routing - Team-Specific Alerts
+  version: 1.0.0
+
+parameters:
+  maintenanceModbusHost:
+    type: string
+    default: "192.168.130.20"
+    description: "Modbus gateway for equipment condition monitoring"
+
+resources:
+  # Equipment Condition Monitoring Connection
+  conditionConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Modbus
+      connection:
+        host: !ref maintenanceModbusHost
+        port: 502
+
+  # Equipment Condition Monitoring Endpoint
+  equipmentConditionEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref conditionConnection
+      subscribe:
+        fc: 4
+        address: 100
+        length: 8
+        interval: 10000
+      topic: maintenance/condition/monitoring
+
+  # Maintenance Alert Routing Based on Equipment Condition
+  maintenanceAlertRouting:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/maintenance/condition/monitoring
+        publish:
+          topic: 'maintenance/teams/{team}/{priority}/work-orders'
+        rules:
+        - setContextVars:
+            vars:
+              team: |
+                $[0] = 1 ? "mechanical" :
+                $[0] = 2 ? "electrical" :
+                $[0] = 3 ? "hydraulic" : "general"
+              priority: |
+                $[1] > 90 or $[2] > 80 ? "urgent" :
+                $[1] > 70 or $[2] > 60 ? "high" :
+                $[1] > 50 or $[2] > 40 ? "medium" : "routine"
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "dynamic_routing": {
+                  "team": $context.vars.team,
+                  "priority": $context.vars.priority,
+                  "final_topic": "maintenance/teams/" & $context.vars.team & "/" & $context.vars.priority & "/work-orders"
+                },
+                "equipment_data": {
+                  "type_code": $[0],
+                  "temperature": $[2],
+                  "vibration": $[3]
+                },
+                "setContextVars_logic": {
+                  "team_logic": "type_code=" & $[0] & " → " & $context.vars.team,
+                  "priority_logic": "temp=" & $[2] & "°C, vibration=" & $[3] & " → " & $context.vars.priority
+                },
+                "original_data": $
+              }
+
+# Example Input Message (from condition monitoring system):
+#
+# Topic: maintenance/condition/monitoring  
+# Payload: [2, 85, 75]
+# Array interpretation:
+# [0] equipment_type_code: 2 (electrical equipment)
+# [1] temperature_c: 85 (high temperature)
+# [2] vibration_level: 75 (elevated vibration)
+#
+# SetContextVars Logic:
+# - team = "electrical" (equipment_type_code = 2)
+# - priority = "high" (temperature = 85 > 70 and vibration = 75 > 60)
+#
+# Expected Output:
+# Topic: maintenance/teams/electrical/high/work-orders
+# {
+#   "timestamp": 1730529600000,
+#   "dynamic_routing": {
+#     "team": "electrical",
+#     "priority": "high",
+#     "final_topic": "maintenance/teams/electrical/high/work-orders"
+#   },
+#   "equipment_data": {
+#     "type_code": 2,
+#     "temperature": 85,
+#     "vibration": 75
+#   },
+#   "setContextVars_logic": {
+#     "team_logic": "type_code=2 → electrical",
+#     "priority_logic": "temp=85°C, vibration=75 → high"
+#   },
+#   "original_data": [2, 85, 75]
+# }

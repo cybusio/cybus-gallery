@@ -1,0 +1,126 @@
+description: >
+  Modbus TCP read with real-world transformation scenarios.
+  Shows converting raw register values to meaningful industrial data like
+  temperature, pressure, and machine status from legacy PLCs.
+
+metadata:
+  name: Modbus Read with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  plcHost:
+    type: string
+    default: "192.168.1.10"
+    description: "PLC IP address"
+
+resources:
+  modbusConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Modbus
+      connection:
+        host: !ref plcHost
+        port: 502
+
+  # Read raw temperature from register (0.1°C units)
+  temperatureRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref modbusConnection
+      subscribe:
+        fc: 3
+        address: 100
+        length: 1
+        dataType: int16BE
+        interval: 2000
+      topic: plc/temperature/raw
+
+  # Read production counter (32-bit across 2 registers)
+  productionCounterRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref modbusConnection
+      subscribe:
+        fc: 3
+        address: 200
+        length: 2
+        dataType: int16BE
+        interval: 5000
+      topic: plc/counter/raw
+
+  # Read machine status bits
+  machineStatusRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref modbusConnection
+      subscribe:
+        fc: 1
+        address: 0
+        length: 8
+        dataType: boolean
+        interval: 1000
+      topic: plc/status/raw
+
+  # Transform raw PLC data to standard manufacturing format
+  plcDataTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert temperature from 0.1°C units to Celsius
+      - subscribe:
+          endpoint: !ref temperatureRead
+        publish:
+          topic: manufacturing/temperature
+        rules:
+        - transform:
+            expression: |
+              {
+                "sensor_id": "TEMP_001",
+                "temperature_celsius": $ / 10,
+                "timestamp": $now()
+              }
+      
+      # Convert 32-bit production counter from two 16-bit registers
+      - subscribe:
+          endpoint: !ref productionCounterRead
+        publish:
+          topic: manufacturing/production
+        rules:
+        - transform:
+            expression: |
+              {
+                "machine_id": "LINE_001",
+                "total_parts": ($[0] * 65536) + $[1],
+                "timestamp": $now()
+              }
+      
+      # Convert status bits to machine state
+      - subscribe:
+          endpoint: !ref machineStatusRead
+        publish:
+          topic: manufacturing/machine_status
+        rules:
+        - transform:
+            expression: |
+              {
+                "machine_id": "LINE_001",
+                "running": $[0],
+                "emergency_stop": $[1],
+                "door_open": $[2],
+                "cycle_complete": $[3],
+                "fault_active": $[4],
+                "auto_mode": $[5],
+                "timestamp": $now()
+              }
+
+# Simple Real-World Examples:
+#
+# 1. Temperature: Raw=235 → {"temperature_celsius": 23.5}
+# 2. Counter: Raw=[0, 1500] → {"total_parts": 1500}
+# 3. Status: Raw=[true,false,false,true,false,true] → {"running": true, "cycle_complete": true}

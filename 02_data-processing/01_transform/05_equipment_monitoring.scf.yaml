@@ -1,0 +1,116 @@
+description: >
+  Equipment health status monitoring using conditional transform logic.
+  Applies intelligent rules to determine equipment condition and alert priorities
+  based on sensor readings for predictive maintenance and operational safety.
+
+metadata:
+  name: Equipment Status Monitoring - Conditional Health Assessment
+  version: 1.0.0
+
+parameters:
+  equipmentMonitoringHost:
+    type: string
+    default: "192.168.130.40" 
+    description: "Equipment monitoring system OPC UA server"
+
+resources:
+  # Equipment Monitoring System Connection
+  equipmentConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref equipmentMonitoringHost
+        port: 4840
+
+  # Press Machine 001 - Condition Monitoring
+  pressMachine001Sensors:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref equipmentConnection
+      subscribe:
+        nodeId: "ns=2;s=Equipment.Press001.ConditionMonitoring"
+        interval: 10000
+      topic: equipment/press-001/condition/raw
+
+  # Welding Station 002 - Health Monitoring  
+  weldingStation002Sensors:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref equipmentConnection
+      subscribe:
+        nodeId: "ns=2;s=Equipment.WeldStation002.HealthData"
+        interval: 8000
+      topic: equipment/welding-002/condition/raw
+
+  # Pump System 003 - Vibration & Temperature
+  pumpSystem003Sensors:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref equipmentConnection
+      subscribe:
+        nodeId: "ns=2;s=Equipment.Pump003.VibrationTemperature"
+        interval: 12000
+      topic: equipment/pump-003/condition/raw
+
+  # Equipment Health Status Assessment - Conditional Logic
+  equipmentHealthAssessment:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/equipment/+equipment_id/condition/raw
+        publish:
+          topic: 'maintenance/alerts/{equipment_id}/status-assessment'
+        rules:
+        - transform:
+            expression: |
+              {
+                /* Extract equipment ID from MQTT topic wildcard */
+                "equipment_id": $context.vars.equipment_id,  /* Context variable from topic pattern +equipment_id */
+                
+                /* Pass through raw sensor readings */
+                "temperature": $.temperature,                /* Temperature sensor value */
+                "vibration": $.vibration,                    /* Vibration sensor value */
+                
+                /* Evaluate temperature condition using threshold logic */
+                "temperature_status": $.temperature > 75 ? "warning" : "normal",  /* Ternary: if temp > 75°C then "warning" else "normal" */
+                
+                /* Evaluate vibration condition using threshold logic */
+                "vibration_status": $.vibration > 3.0 ? "warning" : "normal",     /* Ternary: if vibration > 3.0 units then "warning" else "normal" */
+                
+                /* Determine overall equipment health using OR logic */
+                "overall_status": ($.temperature > 75 or $.vibration > 3.0) ? "alert" : "ok",  /* Boolean OR: alert if ANY condition is true */
+                
+                /* Calculate if maintenance is due based on operating hours */
+                "needs_maintenance": $.operating_hours - $.last_maintenance > 2000,  /* Boolean: true if more than 2000 hours since last service */
+                
+                /* Add timestamp for alert processing */
+                "timestamp": $now()                          /* Current timestamp when assessment was made */
+              }
+
+# Example Input Message (from equipment sensor):
+#
+# Topic: equipment/press-001/condition/raw
+# Payload: {"temperature": 78, "vibration": 3.2, "operating_hours": 8750, "last_maintenance": 6950}
+#
+# Expected Output:
+# Topic: maintenance/alerts/press-001/status-assessment
+# {
+#   "equipment_id": "press-001",
+#   "temperature": 78,
+#   "vibration": 3.2,
+#   "temperature_status": "warning",
+#   "vibration_status": "warning",
+#   "overall_status": "alert",
+#   "needs_maintenance": true,
+#   "timestamp": 1730529600000
+# }
+
+# KEY CONCEPTS:
+# ✅ Conditional logic: Multiple if/then conditions (? : syntax)
+# ✅ Boolean operations: Using 'or' and 'and' in expressions
+# ✅ Threshold-based alerts: Converting sensor values to status levels

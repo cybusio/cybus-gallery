@@ -1,0 +1,134 @@
+description: >
+  Machine health monitoring across factory equipment using Modbus sensors.
+  Aggregates vibration, temperature, and status data with wildcard collect.
+  Shows equipment condition monitoring with cross-machine analytics.
+
+metadata:
+  name: Machine Health Monitoring - Equipment Analytics
+  version: 1.0.0
+
+parameters:
+  modbusGatewayHost:
+    type: string
+    default: "192.168.120.30"
+    description: "Modbus gateway for machine sensors"
+
+resources:
+  # Modbus Connection for Machine Sensors
+  machineConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Modbus
+      connection:
+        host: !ref modbusGatewayHost
+        port: 502
+
+  # CNC Machine 001 Health Data
+  # NOTE: This endpoint follows the pattern: machines/health/{machine-id}/sensors
+  # Additional endpoints can be easily added using the same pattern structure
+  cnc001HealthEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref machineConnection
+      subscribe:
+        fc: 3
+        address: 100
+        length: 4
+        interval: 10000
+      topic: machines/health/cnc-001/sensors
+
+  # CNC Machine 002 Health Data  
+  # NOTE: Same topic pattern as cnc-001, different machine ID - both automatically
+  # collected by the wildcard subscription: machines/health/+machine/sensors
+  cnc002HealthEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref machineConnection
+      subscribe:
+        fc: 3
+        address: 200
+        length: 4
+        interval: 10000
+      topic: machines/health/cnc-002/sensors
+
+  # Robot 001 Health Data
+  # NOTE: Different machine type but same topic pattern - demonstrates how wildcards
+  # can collect from heterogeneous equipment types (CNCs + Robots + any future machines)
+  robot001HealthEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref machineConnection
+      subscribe:
+        fc: 3
+        address: 300
+        length: 4
+        interval: 10000
+      topic: machines/health/robot-001/sensors
+
+  # SCALABILITY NOTE: Additional machines can be added by creating new endpoints with:
+  # - topic: machines/health/{new-machine-id}/sensors (follows the pattern)
+  # - Different Modbus addresses (400, 500, 600, etc.)
+  # - Any protocol (OPC UA, HTTP, MQTT) as long as topic pattern is maintained
+  # The wildcard collect mapping will automatically include them without modification!
+
+  # Multi-Machine Health Analytics
+  machineHealthAnalytics:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          # Wildcard pattern: machines/health/+machine/sensors
+          # Dynamic label: 'machine_{machine}' for unique identification
+          topic: ${Cybus::MqttRoot}/machines/health/+machine/sensors
+          label: 'machine_{machine}'
+        publish:
+          topic: analytics/maintenance/machine-health-summary
+        rules:
+        - collect: {}  # Aggregate all machine health data
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "reporting_machine": $context.vars.machine,
+                "machine_count": $count($keys($)),
+                "current_machine_data": $lookup($, 'machine_' & $context.vars.machine),
+                "all_machines_data": $
+              }
+
+# Example Input Messages (from Modbus machine sensors):
+#
+# From !ref cnc001HealthEndpoint  
+# Topic: machines/health/cnc-001/sensors
+# Payload: [68.5, 2.1, 1850, 1]  // [temperature, vibration, spindle_speed, status]
+#
+# From !ref cnc002HealthEndpoint
+# Topic: machines/health/cnc-002/sensors
+# Payload: [72.3, 1.8, 2100, 1]  // [temperature, vibration, spindle_speed, status]
+#
+# From !ref robot001HealthEndpoint
+# Topic: machines/health/robot-001/sensors
+# Payload: [45.2, 0.3, 0, 1]     // [temperature, vibration, position, status]
+#
+# After Collect Rule - All Machines Aggregated:
+# {
+#   "machine_cnc-001": [68.5, 2.1, 1850, 1],
+#   "machine_cnc-002": [72.3, 1.8, 2100, 1],
+#   "machine_robot-001": [45.2, 0.3, 0, 1]
+# }
+#
+# Expected Output (when robot-001 data arrives):
+# Topic: analytics/maintenance/machine-health-summary
+# {
+#   "timestamp": 1730115600000,
+#   "reporting_machine": "robot-001",
+#   "machine_count": 3,
+#   "current_machine_data": [45.2, 0.3, 0, 1],
+#   "all_machines_data": {
+#     "machine_cnc-001": [68.5, 2.1, 1850, 1],
+#     "machine_cnc-002": [72.3, 1.8, 2100, 1],
+#     "machine_robot-001": [45.2, 0.3, 0, 1]
+#   }
+# }

@@ -1,0 +1,158 @@
+description: >
+  Cross-factory performance comparison using array subscriptions.
+  Monitor OEE metrics from multiple factory locations with different machine types.
+  Demonstrates array mapping for enterprise-level analytics and benchmarking.
+
+metadata:
+  name: Multi-Factory OEE Analytics - Cross-Site Comparison
+  version: 1.0.0
+
+parameters:
+  factoryAHost:
+    type: string
+    default: "192.168.10.100"
+    description: "Factory A OPC UA server"
+    
+  factoryBHost:
+    type: string
+    default: "192.168.20.100" 
+    description: "Factory B OPC UA server"
+
+resources:
+  # Factory A Connection (Automotive Plant)
+  factoryAConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref factoryAHost
+        port: 4840
+
+  # Factory B Connection (Electronics Plant)  
+  factoryBConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref factoryBHost
+        port: 4840
+
+  # =============================================================================
+  # ENTERPRISE-WIDE ARRAY SUBSCRIPTION SCALABILITY  
+  # =============================================================================
+  # This SCF demonstrates array subscriptions for multi-site manufacturing.
+  # Array subscription aggregates OEE data from geographically distributed factories
+  # enabling enterprise-level performance benchmarking and analytics.
+  #
+  # CURRENT FACTORY COVERAGE:
+  # - Factory A (Detroit): Automotive production line OEE
+  # - Factory B (Shenzhen): Electronics assembly line OEE  
+  # - Factory C (Munich): Precision machinery OEE
+  #
+  # ENTERPRISE EXPANSION SCENARIOS - Add more global manufacturing sites:
+  # - Factory D (Tokyo): Semiconductor fabrication OEE
+  # - Factory E (São Paulo): Heavy machinery production OEE
+  # - Factory F (Manchester): Pharmaceutical production OEE
+  # - Pilot Plants: Research facilities, development lines
+  # - Contract Manufacturing: Third-party production partners
+  # - Joint Ventures: Shared manufacturing facilities
+  #
+  # Array subscription enables GLOBAL manufacturing intelligence without
+  # individual mapping configuration for each new site!
+  # =============================================================================
+
+  # Factory A - Automotive Line OEE Data
+  factoryAOeeData:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref factoryAConnection
+      subscribe:
+        nodeId: ns=2;s=ProductionLine.OEE.Current
+        interval: 30000
+      topic: factories/automotive/detroit/oee-metrics
+
+  # Factory B - Electronics Line OEE Data
+  factoryBOeeData:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref factoryBConnection
+      subscribe:
+        nodeId: ns=2;s=Assembly.OEE.Realtime
+        interval: 30000
+      topic: factories/electronics/austin/oee-metrics
+
+  # Factory C - Aerospace Plant (HTTP REST API)
+  factoryCConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Http
+      connection:
+        host: "192.168.50.100"
+        port: 9090
+
+  # Factory C OEE Data via HTTP API
+  factoryCOeeData:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Http
+      connection: !ref factoryCConnection
+      subscribe:
+        method: post
+        path: "/api/production/oee"
+        interval: 30000
+      topic: factories/aerospace/seattle/oee-metrics
+  
+  # Cross-Factory OEE Comparison
+  crossFactoryAnalytics:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          # Array of factory endpoint references (different protocols)
+          - endpoint: !ref factoryAOeeData     # OPC UA endpoint
+            label: factory_detroit
+          - endpoint: !ref factoryBOeeData     # OPC UA endpoint 
+            label: factory_austin
+          - endpoint: !ref factoryCOeeData     # HTTP endpoint
+            label: factory_seattle
+        publish:
+          topic: enterprise/analytics/cross-factory-oee
+        rules:
+        - collect: {}  # Aggregate all factory data
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "detroit_factory": $lookup($, 'factory_detroit'),
+                "austin_factory": $lookup($, 'factory_austin'),
+                "seattle_factory": $lookup($, 'factory_seattle')
+              }
+
+# Example Input Data (from endpoint references):
+#
+# From !ref factoryAOeeData (OPC UA endpoint)
+# Payload: {"oee": 87.2, "availability": 95.1, "performance": 91.7, "quality": 99.8}
+#
+# From !ref factoryBOeeData (OPC UA endpoint)
+# Payload: {"oee": 92.5, "availability": 98.2, "performance": 94.3, "quality": 99.9}
+#
+# From !ref factoryCOeeData (HTTP endpoint)  
+# Payload: {"oee": 85.8, "availability": 89.4, "performance": 96.0, "quality": 99.9}
+#
+# After Collect Rule - All Factory Data:
+# {
+#   "factory_detroit": {"oee": 87.2, "availability": 95.1, "performance": 91.7, "quality": 99.8},
+#   "factory_austin": {"oee": 92.5, "availability": 98.2, "performance": 94.3, "quality": 99.9}, 
+#   "factory_seattle": {"oee": 85.8, "availability": 89.4, "performance": 96.0, "quality": 99.9}
+# }
+#
+# Expected Output:
+# Topic: enterprise/analytics/cross-factory-oee
+# {
+#   "timestamp": 1730115600000,
+#   "detroit_factory": {"oee": 87.2, "availability": 95.1, "performance": 91.7, "quality": 99.8},
+#   "austin_factory": {"oee": 92.5, "availability": 98.2, "performance": 94.3, "quality": 99.9},
+#   "seattle_factory": {"oee": 85.8, "availability": 89.4, "performance": 96.0, "quality": 99.9}
+# }

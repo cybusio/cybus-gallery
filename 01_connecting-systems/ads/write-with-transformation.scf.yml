@@ -1,0 +1,163 @@
+description: >
+  ADS/TwinCAT write with input format transformation.
+  Shows converting standard manufacturing commands to TwinCAT-specific
+  symbol formats for controlling Beckhoff PLCs and EtherCAT devices.
+
+metadata:
+  name: ADS Write with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  adsHost:
+    type: string
+    default: "192.168.1.40"
+  
+  adsLocalNetId:
+    type: string
+    default: "192.168.1.100.1.1"
+    
+  adsNetId:
+    type: string
+    default: "192.168.1.40.1.1"
+
+resources:
+  adsConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Ads
+      connection:
+        localAddress: !ref adsLocalNetId
+        localPort: 32000
+        host: !ref adsHost
+        routerTcpPort: 48898
+        port: 851
+        netId: !ref adsNetId
+
+  # Write setpoint values to TwinCAT
+  setpointWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Ads
+      connection: !ref adsConnection
+      write:
+        symbolName: "MAIN.rTemperatureSetpoint"
+        dataType: "floatLE"
+      topic: ads/setpoint/write
+
+  # Write production parameters
+  productionParamsWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Ads
+      connection: !ref adsConnection
+      write:
+        symbolName: "MAIN.nProductionTarget"
+        dataType: "int32LE"
+      topic: ads/production/target/write
+
+  # Write machine start command
+  machineStartWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Ads
+      connection: !ref adsConnection
+      write:
+        symbolName: "MAIN.bStartCommand"
+        dataType: "boolean"
+      topic: ads/machine/start/write
+
+  # Write servo position command
+  servoPositionWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Ads
+      connection: !ref adsConnection
+      write:
+        symbolName: "MAIN.rTargetPosition"
+        dataType: "floatLE"
+      topic: ads/servo/position/write
+
+  # Transform standard input to TwinCAT formats
+  commandTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert temperature setpoint to TwinCAT REAL
+      - subscribe:
+          topic: manufacturing/temperature/setpoint
+        publish:
+          endpoint: !ref setpointWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert standard temperature to TwinCAT REAL */
+              /* Input: {"temperature_celsius": 25.5, "zone": "oven_1"} */
+              /* Output: 25.5 (TwinCAT REAL data type) */
+              $.temperature_celsius
+
+      # Convert production target to TwinCAT DINT
+      - subscribe:
+          topic: manufacturing/production/target
+        publish:
+          endpoint: !ref productionParamsWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert production target to TwinCAT DINT */
+              /* Input: {"target_parts": 2500, "shift": "night"} */
+              /* Output: 2500 (TwinCAT DINT data type) */
+              $.target_parts
+
+      # Convert machine command to TwinCAT BOOL
+      - subscribe:
+          topic: manufacturing/machine/control
+        publish:
+          endpoint: !ref machineStartWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert start command to TwinCAT BOOL */
+              /* Input: {"action": "start", "mode": "automatic", "safety_ok": true} */
+              /* Output: true (TwinCAT BOOL for start command) */
+              $.action = "start" and $.safety_ok
+
+      # Convert position command to TwinCAT REAL
+      - subscribe:
+          topic: manufacturing/servo/position
+        publish:
+          endpoint: !ref servoPositionWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert position command to TwinCAT REAL */
+              /* Input: {"position_mm": 125.75, "axis": "X", "speed_percent": 80} */
+              /* Output: 125.75 (TwinCAT REAL for position in mm) */
+              $.position_mm
+
+# Input Format Examples:
+#
+# 1. Temperature Setpoint:
+#    Input: {"temperature_celsius": 25.5, "zone": "oven_1"}
+#    TwinCAT Output: 25.5 → MAIN.rTemperatureSetpoint (REAL)
+#
+# 2. Production Target:
+#    Input: {"target_parts": 2500, "shift": "night"}
+#    TwinCAT Output: 2500 → MAIN.nProductionTarget (DINT)
+#
+# 3. Machine Control:
+#    Input: {"action": "start", "mode": "automatic", "safety_ok": true}
+#    TwinCAT Output: true → MAIN.bStartCommand (BOOL)
+#
+# 4. Servo Position:
+#    Input: {"position_mm": 125.75, "axis": "X", "speed_percent": 80}
+#    TwinCAT Output: 125.75 → MAIN.rTargetPosition (REAL)
+
+# Key Concepts:
+# ✅ TwinCAT Data Types: Converting JSON → TwinCAT REAL, DINT, BOOL types
+# ✅ Symbol Addressing: Writing to named TwinCAT variables using symbolName
+# ✅ Safety Logic: Implementing safety conditions in command processing
+# ✅ Type Mapping: Standard manufacturing units → TwinCAT engineering units
+# ✅ Command Validation: Ensuring commands meet safety and operational criteria

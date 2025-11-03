@@ -1,0 +1,70 @@
+description: >
+  FOCAS write with input format transformation.
+  Shows converting standard CNC commands to FOCAS-specific
+  control formats for Fanuc CNC machines (limited write operations).
+
+metadata:
+  name: FOCAS Write with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  focasHost:
+    type: string
+    default: "192.168.2.170"
+
+resources:
+  focasConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Focas
+      connection:
+        host: !ref focasHost
+        port: 8193
+
+  # Write program number selection (limited FOCAS write capability)
+  programSelectWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Focas
+      connection: !ref focasConnection
+      write:
+        method: "cnc_select"
+      topic: focas/program/select/write
+
+  # Transform standard input to FOCAS formats
+  commandTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert program selection command to FOCAS format
+      - subscribe:
+          topic: manufacturing/cnc/program/select
+        publish:
+          endpoint: !ref programSelectWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert program selection to FOCAS format */
+              /* Input: {"program_number": "O1234", "operation": "select"} */
+              /* Output: Program number for FOCAS selection */
+              {
+                "program": $number($substring($.program_number, 1))
+              }
+
+# Input Format Examples:
+#
+# 1. Program Selection:
+#    Input: {"program_number": "O1234", "operation": "select"}
+#    FOCAS Output: {"program": 1234}
+
+# Key Concepts:
+# ✅ FOCAS Limitations: Most FOCAS operations are read-only
+# ✅ Program Control: Limited write operations for program selection
+# ✅ String Processing: Converting program names to numbers
+# ✅ Simple Mapping: Basic data format conversion
+
+# Note: FOCAS protocol has very limited write capabilities.
+# Most CNC control is done through the machine's control panel or DNC operations.

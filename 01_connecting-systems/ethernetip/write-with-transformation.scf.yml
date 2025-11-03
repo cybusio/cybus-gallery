@@ -1,0 +1,125 @@
+description: >
+  EtherNet/IP write with input format transformation.
+  Shows converting standard manufacturing commands to Allen-Bradley
+  PLC tag formats for controlling Rockwell Automation systems.
+
+metadata:
+  name: EtherNet/IP Write with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  plcHost:
+    type: string
+    default: "192.168.1.60"
+
+resources:
+  ethernetipConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: EthernetIp
+      connection:
+        host: !ref plcHost
+
+  # Write setpoint values
+  setpointWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: EthernetIp
+      connection: !ref ethernetipConnection
+      write:
+        tagName: "Temperature_SP"
+        programName: "MainProgram"
+        tagType: "REAL"
+      topic: ethernetip/setpoint/write
+
+  # Write production target
+  productionTargetWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: EthernetIp
+      connection: !ref ethernetipConnection
+      write:
+        tagName: "ProductionTarget"
+        programName: "MainProgram"
+        tagType: "DINT"
+      topic: ethernetip/production/target/write
+
+  # Write machine control
+  machineControlWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: EthernetIp
+      connection: !ref ethernetipConnection
+      write:
+        tagName: "StartCommand"
+        programName: "MainProgram"
+        tagType: "BOOL"
+      topic: ethernetip/machine/start/write
+
+  # Transform standard input to Allen-Bradley formats
+  commandTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert temperature setpoint to Allen-Bradley REAL
+      - subscribe:
+          topic: manufacturing/temperature/setpoint
+        publish:
+          endpoint: !ref setpointWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert standard temperature to Allen-Bradley REAL */
+              /* Input: {"temperature_celsius": 25.0, "zone": "oven"} */
+              /* Output: 25.0 (Allen-Bradley REAL tag) */
+              $.temperature_celsius
+
+      # Convert production target to Allen-Bradley DINT
+      - subscribe:
+          topic: manufacturing/production/target
+        publish:
+          endpoint: !ref productionTargetWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert production target to Allen-Bradley DINT */
+              /* Input: {"target_parts": 1500, "shift": "day"} */
+              /* Output: 1500 (Allen-Bradley DINT tag) */
+              $.target_parts
+
+      # Convert machine command to Allen-Bradley BOOL
+      - subscribe:
+          topic: manufacturing/machine/control
+        publish:
+          endpoint: !ref machineControlWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert start command to Allen-Bradley BOOL */
+              /* Input: {"action": "start", "mode": "auto", "safety_ok": true} */
+              /* Output: true (Allen-Bradley BOOL tag) */
+              $.action = "start" and $.safety_ok
+
+# Input Format Examples:
+#
+# 1. Temperature Setpoint:
+#    Input: {"temperature_celsius": 25.0, "zone": "oven"}
+#    Allen-Bradley Output: 25.0 → Temperature_SP (REAL)
+#
+# 2. Production Target:
+#    Input: {"target_parts": 1500, "shift": "day"}
+#    Allen-Bradley Output: 1500 → ProductionTarget (DINT)
+#
+# 3. Machine Control:
+#    Input: {"action": "start", "mode": "auto", "safety_ok": true}
+#    Allen-Bradley Output: true → StartCommand (BOOL)
+
+# Key Concepts:
+# ✅ Allen-Bradley Tags: Writing to named tags in Rockwell PLCs
+# ✅ CIP Data Types: Converting to REAL, DINT, BOOL tag types
+# ✅ Program Context: Specifying program names for tag access
+# ✅ Safety Logic: Implementing safety conditions in control commands
+# ✅ Simple Mapping: Direct value extraction for PLC tags

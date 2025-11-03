@@ -1,0 +1,125 @@
+description: >
+  OPC UA read with real-world transformation scenarios.
+  Shows converting OPC UA node values to standardized industrial data
+  from manufacturing equipment and process control systems.
+
+metadata:
+  name: OPC UA Read with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  opcuaHost:
+    type: string
+    default: "192.168.1.20"
+  
+  opcuaPort:
+    type: integer
+    default: 4840
+
+resources:
+  opcuaConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref opcuaHost
+        port: !ref opcuaPort
+
+  # Read machine status from OPC UA server
+  machineStatusRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref opcuaConnection
+      subscribe:
+        nodeId: "ns=2;i=1001"
+        interval: 2000
+      topic: opcua/machine/status/raw
+
+  # Read sensor array data
+  sensorArrayRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref opcuaConnection
+      subscribe:
+        nodeId: "ns=2;i=2001"
+        interval: 3000
+      topic: opcua/sensors/array/raw
+
+  # Read production data structure
+  productionDataRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref opcuaConnection
+      subscribe:
+        nodeId: "ns=2;i=3001"
+        interval: 5000
+      topic: opcua/production/data/raw
+
+  # Transform OPC UA data to standard manufacturing format
+  opcuaDataTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert OPC UA machine status to standard format
+      - subscribe:
+          endpoint: !ref machineStatusRead
+        publish:
+          topic: manufacturing/machine/status
+        rules:
+        - transform:
+            expression: |
+              {
+                "machine_id": "OPCUA_MACHINE_001",
+                "status_code": $.StatusCode,
+                "error_message": $.ErrorMessage,
+                "timestamp": $now()
+              }
+
+      # Convert sensor array to individual sensor readings
+      - subscribe:
+          endpoint: !ref sensorArrayRead
+        publish:
+          topic: manufacturing/sensors/readings
+        rules:
+        - transform:
+            expression: |
+              {
+                "sensor_group": "PRODUCTION_LINE",
+                "temperature": $.TemperatureSensors[0],
+                "pressure": $.PressureSensors[0],
+                "timestamp": $now()
+              }
+
+      # Convert production data structure
+      - subscribe:
+          endpoint: !ref productionDataRead
+        publish:
+          topic: manufacturing/production/metrics
+        rules:
+        - transform:
+            expression: |
+              {
+                "production_line": "LINE_001",
+                "cycle_number": $.CycleData.CycleNumber,
+                "parts_produced": $.CycleData.PartsProduced,
+                "total_parts": $.ProductionTotals.TotalParts,
+                "good_parts": $.ProductionTotals.GoodParts,
+                "timestamp": $now()
+              }
+
+# Simple Real-World Examples:
+#
+# 1. Machine Status: {"StatusCode": 0, "ErrorMessage": ""} 
+#    → {"status_code": 0, "error_message": ""}
+#
+# 2. Sensor Array: {"TemperatureSensors": [23.5], "PressureSensors": [2.5]}
+#    → {"temperature": 23.5, "pressure": 2.5}
+#
+# 3. Production Data: {"CycleData": {"CycleNumber": 1500}, "ProductionTotals": {"GoodParts": 1485}}
+#    → {"cycle_number": 1500, "good_parts": 1485}

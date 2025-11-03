@@ -1,0 +1,203 @@
+description: >
+  Quality control monitoring with multi-dimensional wildcards.
+  Monitor inspection stations, test results, and quality metrics across production lines.
+  Demonstrates complex wildcard patterns for quality assurance systems.
+
+metadata:
+  name: Quality Control System - Multi-Station Monitoring
+  version: 1.0.0
+
+parameters:
+  qualitySystemHost:
+    type: string
+    default: "192.168.2.150"
+    description: "Quality control system OPC UA server"
+    
+  reportingInterval:
+    type: integer
+    default: 10000
+    description: "Quality report publishing interval (ms)"
+
+resources:
+  # OPC UA Connection for Quality Control System
+  qualityControlConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref qualitySystemHost
+        port: 4840
+
+  # =============================================================================
+  # COMPLEX WILDCARD PATTERN SCALABILITY
+  # =============================================================================
+  # This SCF demonstrates complex multi-level wildcards for quality systems:
+  #
+  # Wildcard Pattern: quality/stations/+line/inspection/+test_type
+  # 
+  # CURRENT QUALITY STATIONS follow this hierarchical pattern:
+  # - quality/stations/line-A/inspection/dimensional
+  # - quality/stations/line-A/inspection/visual
+  # - quality/stations/line-B/inspection/functional
+  # - quality/stations/line-B/inspection/surface-finish
+  #
+  # EXPANSION SCENARIOS: Quality systems can easily scale across:
+  # - quality/stations/line-C/inspection/electrical (New line with electrical tests)
+  # - quality/stations/line-C/inspection/torque (Torque testing)
+  # - quality/stations/incoming/inspection/material (Incoming material inspection)
+  # - quality/stations/final/inspection/packaging (Final packaging quality)
+  # - quality/stations/calibration/inspection/equipment (Equipment calibration)
+  #
+  # ALL captured by: quality/stations/+line/inspection/+test_type
+  # This enables enterprise-wide quality monitoring without configuration changes!
+  # =============================================================================
+        
+  # Line A Quality Station
+  lineADimensionalCheck:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref qualityControlConnection
+      subscribe:
+        nodeId: ns=2;s=QualityStation.LineA.DimensionalCheck.Result
+        interval: 15000
+      topic: quality/stations/line-A/inspection/dimensional
+
+  lineAVisualInspection:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref qualityControlConnection
+      subscribe:
+        nodeId: ns=2;s=QualityStation.LineA.VisualInspection.Status
+        interval: 20000
+      topic: quality/stations/line-A/inspection/visual
+
+  # Line B Quality Station
+  lineBLeakTest:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref qualityControlConnection
+      subscribe:
+        nodeId: ns=2;s=QualityStation.LineB.LeakTest.Pressure
+        interval: 12000
+      topic: quality/stations/line-B/testing/leak-test
+
+  lineBFunctionalTest:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref qualityControlConnection
+      subscribe:
+        nodeId: ns=2;s=QualityStation.LineB.FunctionalTest.Result
+        interval: 25000
+      topic: quality/stations/line-B/testing/functional
+
+  # Line C Final Inspection
+  lineCFinalInspection:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref qualityControlConnection
+      subscribe:
+        nodeId: ns=2;s=QualityStation.LineC.FinalInspection.OverallResult
+        interval: 30000
+      topic: quality/stations/line-C/final-check/overall
+
+  # Quality Data Aggregation - Multi-dimensional Wildcards
+  qualityMetricsAggregation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      # Pattern 1: All inspection results across all lines
+      - subscribe:
+          # Matches: ${Cybus::MqttRoot}/quality/stations/+/inspection/+
+          # Examples:
+          # - ${Cybus::MqttRoot}/quality/stations/line-A/inspection/dimensional
+          # - ${Cybus::MqttRoot}/quality/stations/line-A/inspection/visual
+          # - ${Cybus::MqttRoot}/quality/stations/line-B/inspection/surface
+          topic: ${Cybus::MqttRoot}/quality/stations/+/inspection/+
+        publish:
+          topic: analytics/quality/inspection-summary
+        rules:
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "line": $split($context.topic, "/")[2],
+                "test_type": $split($context.topic, "/")[4],
+                "result": $.result ? $.result : $
+              }
+
+      # Pattern 2: All testing results (leak, functional, etc.)
+      - subscribe:
+          # Matches: ${Cybus::MqttRoot}/quality/stations/+/testing/+
+          # Examples:
+          # - ${Cybus::MqttRoot}/quality/stations/line-B/testing/leak-test
+          # - ${Cybus::MqttRoot}/quality/stations/line-B/testing/functional
+          # - ${Cybus::MqttRoot}/quality/stations/line-C/testing/pressure
+          topic: ${Cybus::MqttRoot}/quality/stations/+/testing/+
+        publish:
+          topic: analytics/quality/testing-summary
+        rules:
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "line": $split($context.topic, "/")[2],
+                "test_type": $split($context.topic, "/")[4],
+                "value": $.value ? $.value : $.pressure ? $.pressure : $
+              }
+
+      # Pattern 3: Multi-level wildcard for ALL quality data
+      - subscribe:
+          # Matches: ${Cybus::MqttRoot}/quality/stations/+/+/+  
+          # Captures everything: inspection, testing, final-check
+          # Examples:
+          # - ${Cybus::MqttRoot}/quality/stations/line-A/inspection/dimensional
+          # - ${Cybus::MqttRoot}/quality/stations/line-B/testing/leak-test
+          # - ${Cybus::MqttRoot}/quality/stations/line-C/final-check/overall
+          topic: ${Cybus::MqttRoot}/quality/stations/+/+/+
+        publish:
+          topic: analytics/quality/comprehensive-report
+        rules:
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "line": $split($context.topic, "/")[2],
+                "process": $split($context.topic, "/")[3],
+                "test": $split($context.topic, "/")[4],
+                "result": $
+              }
+
+# Example Input Messages (from Quality Control OPC UA):
+#
+# Topic: quality/stations/line-A/inspection/dimensional
+# Payload: {"result": "PASS", "confidence": 0.98, "measurement": 25.02}
+#
+# Topic: quality/stations/line-B/testing/leak-test  
+# Payload: {"pressure": 0.05, "status": "OK", "duration": 45}
+#
+# Topic: quality/stations/line-C/final-check/overall
+# Payload: "PASS"
+#
+# Expected Output Examples:
+#
+# To: analytics/quality/inspection-summary
+# {
+#   "timestamp": 1730115600000,
+#   "line": "line-A", 
+#   "test_type": "dimensional",
+#   "result": "PASS"
+# }
+#
+# To: analytics/quality/comprehensive-report  
+# {
+#   "timestamp": 1730115600000,
+#   "line": "line-C",
+#   "process": "final-check",
+#   "test": "overall",
+#   "result": "PASS"
+# }

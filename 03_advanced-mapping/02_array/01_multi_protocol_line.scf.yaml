@@ -1,0 +1,158 @@
+description: >
+  Multi-protocol production line monitoring with array subscriptions.
+  Combines OPC UA machines, Modbus sensors, and MQTT devices in one analytics system.
+  Demonstrates array mapping with different endpoint types and protocols.
+
+metadata:
+  name: Production Line Analytics - Multi-Protocol Integration
+  version: 1.0.0
+
+parameters:
+  opcuaServerHost:
+    type: string
+    default: "192.168.1.100"
+    description: "OPC UA server for CNC machines"
+    
+  modbusGatewayHost:
+    type: string
+    default: "192.168.1.200" 
+    description: "Modbus gateway for temperature sensors"
+
+resources:
+  # OPC UA Connection for CNC Machines
+  cncConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref opcuaServerHost
+        port: 4840
+
+  # Modbus Connection for Temperature Sensors  
+  sensorConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Modbus
+      connection:
+        host: !ref modbusGatewayHost
+        port: 502
+
+  # =============================================================================
+  # MULTI-PROTOCOL ARRAY SUBSCRIPTION SCALABILITY
+  # =============================================================================
+  # This SCF demonstrates array subscriptions across different protocols.
+  # The array subscription enables monitoring heterogeneous equipment with
+  # different communication protocols in a unified analytics system.
+  #
+  # CURRENT PROTOCOL COVERAGE:
+  # - OPC UA: CNC machines, industrial controllers
+  # - Modbus: Temperature sensors, PLCs
+  # - MQTT: IoT devices (simulated with internal topics)
+  #
+  # EXPANSION POSSIBILITIES - Add more endpoints with same array subscription:
+  # - Additional OPC UA: Robot controllers, vision systems, SCADA
+  # - Additional Modbus: Pressure sensors, flow meters, energy meters
+  # - Additional MQTT: Wireless sensors, mobile devices, cloud systems
+  # - HTTP endpoints: REST APIs, web services, cloud platforms
+  # - Serial/TCP: Legacy equipment, barcode scanners, scales
+  #
+  # The array subscription automatically aggregates ALL protocols!
+  # =============================================================================
+
+  # CNC Machine Status (OPC UA)
+  cncMachineStatus:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref cncConnection
+      subscribe:
+        nodeId: ns=2;s=CNC_Machine_001.Status
+        interval: 10000
+      topic: production/cnc/machine-001/status
+
+  # Temperature Sensor (Modbus)
+  temperatureSensor:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref sensorConnection
+      subscribe:
+        fc: 3
+        address: 100
+        length: 2
+        interval: 5000
+      topic: production/sensors/temperature/zone-a
+
+  # Robot Controller Connection (HTTP/REST API)
+  robotConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Http
+      connection:
+        host: "192.168.1.150"
+        port: 8080
+
+  # Robot Status Endpoint
+  robotController:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Http
+      connection: !ref robotConnection
+      subscribe:
+        method: post
+        path: "/api/robot/status"
+        interval: 15000
+      topic: production/robot/arm-001/status
+  
+  # Array Mapping - Multi-Protocol Production Analytics
+  productionLineAnalytics:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          # Array mixing endpoint references and topic strings
+          - endpoint: !ref cncMachineStatus    # OPC UA endpoint reference
+            label: cnc_machine
+          - endpoint: !ref temperatureSensor   # Modbus endpoint reference 
+            label: temp_sensor
+          - endpoint: !ref robotController     # HTTP endpoint reference
+            label: robot_arm
+        publish:
+          topic: analytics/production/line-summary
+        rules:
+        - collect: {}  # Collect all protocol sources
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "cnc_data": $lookup($, 'cnc_machine'),
+                "sensor_data": $lookup($, 'temp_sensor'),
+                "robot_data": $lookup($, 'robot_arm')
+              }
+
+# Example Input Data (from endpoint references):
+#
+# From !ref cncMachineStatus (OPC UA endpoint)
+# Payload: {"machineState": "Running", "program": "PART_001", "feedRate": 1500}
+#
+# From !ref temperatureSensor (Modbus endpoint)  
+# Payload: [68.5, 1]  // [temperature, status_register]
+#
+# From !ref robotController (HTTP endpoint)
+# Payload: {"status": "Ready", "position": "HOME", "program": "PICK_PLACE"}
+#
+# After Collect Rule - All Data Combined:
+# {
+#   "cnc_machine": {"machineState": "Running", "program": "PART_001", "feedRate": 1500},
+#   "temp_sensor": [68.5, 1],
+#   "robot_arm": {"status": "Ready", "position": "HOME", "program": "PICK_PLACE"}
+# }
+#
+# Expected Output:
+# Topic: analytics/production/line-summary
+# {
+#   "timestamp": 1730115600000,
+#   "cnc_data": {"machineState": "Running", "program": "PART_001", "feedRate": 1500},
+#   "sensor_data": [68.5, 1],
+#   "robot_data": {"status": "Ready", "position": "HOME", "program": "PICK_PLACE"}
+# }

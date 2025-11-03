@@ -1,0 +1,44 @@
+services:
+  grafana:
+    image: grafana/grafana:11.1.3
+    container_name: grafana
+    restart: unless-stopped
+    volumes:
+      - ./data/grafana/data:/var/lib/grafana
+      - ./configs/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+    networks:
+      - public
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+    depends_on:
+      - loki
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+
+  loki:
+    image: grafana/loki:3.1.1
+    container_name: loki
+    command: -config.file=/mnt/loki-local-config.yaml
+    user: root
+    restart: unless-stopped
+    volumes:
+      - ./data/loki/data:/tmp/loki
+      - ./configs/loki/loki.yml:/mnt/loki-local-config.yaml
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    networks:
+      - public
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+
+networks:
+  public:
+    name: public

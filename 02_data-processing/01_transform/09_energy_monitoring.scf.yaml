@@ -1,0 +1,140 @@
+description: >
+  Energy monitoring data aggregation and efficiency calculations.
+  Processes power meter readings to calculate energy consumption,
+  efficiency metrics, and cost analysis for facility management.
+
+metadata:
+  name: Energy Monitoring - Power Data Aggregation
+  version: 1.0.0
+
+parameters:
+  energyMeterHost:
+    type: string
+    default: "192.168.3.20"
+    description: "Energy monitoring system"
+
+resources:
+  # Energy Meter Connection
+  energyMeterConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Modbus
+      connection:
+        host: !ref energyMeterHost
+        port: 502
+
+  # Power Meter Readings
+  powerMeterReadings:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref energyMeterConnection
+      subscribe:
+        fc: 3
+        address: 1000
+        length: 10
+        interval: 10000
+      topic: energy/meters/line-01/raw
+
+  # Energy Data Processing
+  energyDataProcessing:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/energy/meters/line-01/raw
+        publish:
+          topic: facility/energy/line-01/processed
+        rules:
+        - transform:
+            expression: |
+              {
+                /* Static meter identification */
+                "meter_id": "EM-LINE-01",                    /* Energy meter identifier */
+                
+                /* Convert raw power readings from Watts to kiloWatts */
+                "power_readings": {
+                  "active_power_kw": $round($[0] / 1000, 2),      /* Register 0: Active power W → kW, 2 decimal places */
+                  "reactive_power_kvar": $round($[1] / 1000, 2),  /* Register 1: Reactive power VAr → kVAr */
+                  "apparent_power_kva": $round($[2] / 1000, 2),   /* Register 2: Apparent power VA → kVA */
+                  "power_factor": $round($[3] / 100, 3)           /* Register 3: Power factor scaled from 0-100 to 0-1.0 */
+                },
+                
+                /* Calculate energy consumption and costs */
+                "energy_consumption": {
+                  "total_kwh": $round($[4] / 1000, 1),            /* Register 4: Total energy Wh → kWh */
+                  "daily_kwh": $round($[5] / 1000, 1),            /* Register 5: Daily energy Wh → kWh */
+                  "cost_per_hour": $round(($[0] / 1000) * 0.12, 2)  /* Real-time cost: kW × $0.12/kWh rate */
+                },
+                
+                /* Evaluate efficiency metrics */
+                "efficiency_metrics": {
+                  /* Good power factor threshold (≥0.9) */
+                  "power_factor_good": $[3] / 100 >= 0.9,         /* Boolean: true if PF ≥ 0.9 */
+                  
+                  /* Load factor: actual load vs rated capacity (50kW) */
+                  "load_factor": $round(($[0] / 1000) / 50, 2),   /* Current load / maximum capacity */
+                  
+                  /* Efficiency rating based on power factor ranges */
+                  "efficiency_rating": ($[3] / 100 >= 0.95) ? "excellent" :     /* PF ≥ 0.95 */
+                                      ($[3] / 100 >= 0.9) ? "good" :             /* PF ≥ 0.9 */
+                                      ($[3] / 100 >= 0.8) ? "fair" : "poor"      /* PF ≥ 0.8, else poor */
+                },
+                
+                /* Generate alert flags based on thresholds */
+                "alerts": {
+                  "high_consumption": ($[0] / 1000) > 45,         /* Alert if power > 45kW */
+                  "low_power_factor": ($[3] / 100) < 0.8,         /* Alert if PF < 0.8 */
+                  "demand_peak": ($[0] / 1000) > 40               /* Alert if approaching peak demand (40kW) */
+                },
+                
+                /* Processing timestamp */
+                "timestamp": $now()                              /* Current timestamp when energy data processed */
+              }
+
+# Example Input Message:
+#
+# Topic: energy/meters/line-01/raw
+# Modbus registers: [38500, 12300, 42100, 87, 125600, 1250, 0, 0, 0, 0]
+# Register meanings:
+# [0] Active Power (W) = 38500W = 38.5kW
+# [1] Reactive Power (VAr) = 12300VAr = 12.3kVAr  
+# [2] Apparent Power (VA) = 42100VA = 42.1kVA
+# [3] Power Factor (*100) = 87 = 0.87
+# [4] Total Energy (Wh) = 125600Wh = 125.6kWh
+# [5] Daily Energy (Wh) = 1250Wh = 1.25kWh
+
+# Expected Output:
+# Topic: facility/energy/line-01/processed
+# {
+#   "meter_id": "EM-LINE-01",
+#   "power_readings": {
+#     "active_power_kw": 38.5,
+#     "reactive_power_kvar": 12.3,
+#     "apparent_power_kva": 42.1,
+#     "power_factor": 0.87
+#   },
+#   "energy_consumption": {
+#     "total_kwh": 125.6,
+#     "daily_kwh": 1.25,
+#     "cost_per_hour": 4.62
+#   },
+#   "efficiency_metrics": {
+#     "power_factor_good": false,
+#     "load_factor": 0.77,
+#     "efficiency_rating": "fair"
+#   },
+#   "alerts": {
+#     "high_consumption": false,
+#     "low_power_factor": true,
+#     "demand_peak": false
+#   },
+#   "timestamp": 1730529600000
+# }
+
+# KEY CONCEPTS:
+# ✅ Unit scaling: Converting register values to engineering units (W to kW)
+# ✅ Cost calculations: Real-time energy cost computation
+# ✅ Efficiency analysis: Power factor and load factor evaluation
+# ✅ Threshold alerts: Automated monitoring for energy management
+# ✅ Multi-register processing: Handling complex meter data arrays

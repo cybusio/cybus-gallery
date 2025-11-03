@@ -1,0 +1,155 @@
+description: >
+  ISA-95 compliant UNS (Unified Namespace) implementation for enterprise asset monitoring.
+  Transforms legacy manufacturing systems into standardized ISA-95 hierarchy with automatic
+  level classification, equipment categorization, and semantic metadata generation.
+  Demonstrates wildcard-based routing for enterprise digital transformation.
+
+metadata:
+  name: ISA-95 UNS Asset Monitoring - Enterprise Manufacturing Integration
+  version: 2.0.0
+
+parameters:
+  legacyOpcuaHost:
+    type: string
+    default: "192.168.140.30"
+    description: "OPC UA server for legacy asset monitoring systems"
+
+resources:
+  # Legacy Asset Monitoring Connection
+  legacyConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref legacyOpcuaHost
+        port: 4840
+
+  # Plant 01 Production Line A Robot Asset
+  plant01LineARobotEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref legacyConnection
+      subscribe:
+        nodeId: "ns=2;s=Legacy.Plant01.ProductionArea.LineA.RobotArm.Data"
+        interval: 10000
+      topic: legacy/plant-01/production/line-a/robot-arm/data
+
+  # Plant 01 Production Line A Conveyor Asset
+  plant01LineAConveyorEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref legacyConnection
+      subscribe:
+        nodeId: "ns=2;s=Legacy.Plant01.ProductionArea.LineA.Conveyor.Data"
+        interval: 10000
+      topic: legacy/plant-01/production/line-a/conveyor/data
+
+  # Plant 02 Quality Area Inspection Station Asset
+  plant02QualityInspectionEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref legacyConnection
+      subscribe:
+        nodeId: "ns=2;s=Legacy.Plant02.QualityArea.Station.InspectionUnit.Data"
+        interval: 15000
+      topic: legacy/plant-02/quality/station/inspection-unit/data
+
+  # ISA-95 Compliant UNS Enterprise Asset Routing
+  isa95UniversalNamespaceRouting:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/legacy/+site/+area/+line/+asset/data
+        publish:
+          topic: 'UNS/Enterprise/ManufacturingCorp/Site/{site}/Area/{area}/Line/{line}/Equipment/{asset}'
+        rules:
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "isa95_hierarchy": {
+                  "enterprise": "ManufacturingCorp",
+                  "site": $context.vars.site,
+                  "area": $context.vars.area,
+                  "line": $context.vars.line,
+                  "equipment": $context.vars.asset,
+                  "full_path": "Enterprise/ManufacturingCorp/Site/" & $context.vars.site & "/Area/" & $context.vars.area & "/Line/" & $context.vars.line & "/Equipment/" & $context.vars.asset
+                },
+                "isa95_classification": {
+                  "level": $.asset_type = "sensor" ? "Level-0" : $.asset_type = "machine" ? "Level-1" : "Level-2",
+                  "class": $contains($context.vars.asset, "robot") ? "Robotics" : $contains($context.vars.asset, "conveyor") ? "MaterialHandling" : "General"
+                },
+                "wildcard_routing": {
+                  "extracted_values": {
+                    "site": $context.vars.site,
+                    "area": $context.vars.area,
+                    "line": $context.vars.line,
+                    "asset": $context.vars.asset
+                  },
+                  "topic_transformation": {
+                    "from": $context.topic,
+                    "to": "UNS/Enterprise/ManufacturingCorp/Site/" & $context.vars.site & "/Area/" & $context.vars.area & "/Line/" & $context.vars.line & "/Equipment/" & $context.vars.asset
+                  }
+                },
+                "asset_data": {
+                  "status": $.status,
+                  "oee": $.oee,
+                  "temperature": $.temperature
+                }
+              }
+
+# Example Input Messages (from legacy asset monitoring systems):
+#
+# From Plant 01 Robot Arm (OPC UA):
+# Topic: legacy/plant-01/production/line-a/robot-arm/data
+# Payload: {
+#   "asset_type": "machine",
+#   "status": "running",
+#   "oee": 0.87,
+#   "temperature": 68.5
+# }
+#
+# Wildcard Extraction: 
+# site = "plant-01"
+# area = "production" 
+# line = "line-a"
+# asset = "robot-arm"
+#
+# Expected ISA-95 Compliant Output:
+# Topic: UNS/Enterprise/ManufacturingCorp/Site/plant-01/Area/production/Line/line-a/Equipment/robot-arm
+# {
+#   "timestamp": 1730529600000,
+#   "isa95_hierarchy": {
+#     "enterprise": "ManufacturingCorp",
+#     "site": "plant-01",
+#     "area": "production",
+#     "line": "line-a",
+#     "equipment": "robot-arm",
+#     "full_path": "Enterprise/ManufacturingCorp/Site/plant-01/Area/production/Line/line-a/Equipment/robot-arm"
+#   },
+#   "isa95_classification": {
+#     "level": "Level-1",
+#     "class": "Robotics"
+#   },
+#   "wildcard_routing": {
+#     "extracted_values": {
+#       "site": "plant-01",
+#       "area": "production",
+#       "line": "line-a", 
+#       "asset": "robot-arm"
+#     },
+#     "topic_transformation": {
+#       "from": "legacy/plant-01/production/line-a/robot-arm/data",
+#       "to": "UNS/Enterprise/ManufacturingCorp/Site/plant-01/Area/production/Line/line-a/Equipment/robot-arm"
+#     }
+#   },
+#   "asset_data": {
+#     "status": "running",
+#     "oee": 0.87,
+#     "temperature": 68.5
+#   }
+# }

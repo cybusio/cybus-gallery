@@ -1,0 +1,34 @@
+description: >
+  Simple HTTP POST to MQTT bridge that forwards incoming JSON data
+  from HTTP POST requests directly to MQTT topics.
+
+metadata:
+  name: HTTP POST to MQTT Bridge
+
+resources:
+  # HTTP server for receiving POST requests
+  httpServer:
+    type: Cybus::Server::Http
+    properties:
+      basePath: /my/custom/path
+
+  # HTTP endpoint that accepts POST requests
+  # URL: https://your-connectware.com/data/my/custom/path/sensor-data
+  sensorEndpoint:
+    type: Cybus::Node::Http
+    properties:
+      parent: !ref httpServer
+      method: POST
+      route: /sensor-data
+
+  # Simple mapping: HTTP POST data → MQTT topic
+  httpToMqttMapping:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          # Subscribe from topics/endpoints - use array for multiple: [- item1, - item2]
+          endpoint: !ref sensorEndpoint
+        publish:
+          # Forward all POST data to this MQTT topic
+          topic: sensors/data

@@ -1,0 +1,151 @@
+description: >
+  Machine-specific data routing using wildcard patterns for equipment monitoring.
+  Routes machine telemetry to machine-specific analysis topics based on machine ID
+  and creates maintenance reports for each monitored asset.
+
+metadata:
+  name: Machine Data Routing - Equipment-Specific Analytics
+  version: 1.0.0
+
+parameters:
+  machineOpcuaHost:
+    type: string
+    default: "192.168.140.10"
+    description: "OPC UA server for machine monitoring system"
+
+resources:
+  # Machine Monitoring System Connection
+  machineConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref machineOpcuaHost
+        port: 4840
+
+  # =============================================================================
+  # DYNAMIC PUBLISH TOPIC SCALABILITY WITH WILDCARDS
+  # =============================================================================
+  # This SCF demonstrates wildcard-based dynamic routing where each machine
+  # automatically gets its own dedicated analytics topic. The pattern enables
+  # machine-specific routing without individual mapping configuration.
+  #
+  # WILDCARD ROUTING PATTERN: machines/+machine_id/telemetry/data → analytics/machines/{machine_id}/performance/reports
+  #
+  # CURRENT MACHINE ENDPOINTS:
+  # - machines/cnc-001/telemetry/data → analytics/machines/cnc-001/performance/reports
+  # - machines/cnc-002/telemetry/data → analytics/machines/cnc-002/performance/reports  
+  # - machines/robot-001/telemetry/data → analytics/machines/robot-001/performance/reports
+  #
+  # SCALABILITY EXAMPLES - Add more machines with same routing pattern:
+  # - machines/lathe-001/telemetry/data → analytics/machines/lathe-001/performance/reports
+  # - machines/mill-002/telemetry/data → analytics/machines/mill-002/performance/reports
+  # - machines/welder-003/telemetry/data → analytics/machines/welder-003/performance/reports
+  # - machines/press-004/telemetry/data → analytics/machines/press-004/performance/reports
+  # - machines/robot-005/telemetry/data → analytics/machines/robot-005/performance/reports
+  #
+  # Each new machine automatically gets dedicated analytics without mapping changes!
+  # =============================================================================
+
+  # CNC Machine 001 Telemetry
+  cnc001TelemetryEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref machineConnection
+      subscribe:
+        nodeId: "ns=2;s=Machines.CNC001.Telemetry"
+        interval: 5000
+      topic: machines/cnc-001/telemetry/data
+
+  # CNC Machine 002 Telemetry
+  cnc002TelemetryEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref machineConnection
+      subscribe:
+        nodeId: "ns=2;s=Machines.CNC002.Telemetry"
+        interval: 5000
+      topic: machines/cnc-002/telemetry/data
+
+  # Robot Arm 001 Telemetry
+  robot001TelemetryEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref machineConnection
+      subscribe:
+        nodeId: "ns=2;s=Machines.Robot001.Telemetry"
+        interval: 5000
+      topic: machines/robot-001/telemetry/data
+
+  # Machine-Specific Analytics Routing
+  machineAnalyticsRouting:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/machines/+machine_id/telemetry/data
+        publish:
+          topic: 'analytics/machines/{machine_id}/performance/reports'
+        rules:
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "machine_routing": {
+                  "machine_id": $context.vars.machine_id,
+                  "machine_type": $contains($context.vars.machine_id, "cnc") ? "cnc" : "robot",
+                  "analytics_topic": "analytics/machines/" & $context.vars.machine_id & "/performance/reports"
+                },
+                "performance": {
+                  "oee": $.oee,
+                  "temperature": $.temperature,
+                  "status": $.oee > 0.85 ? "excellent" : "good"
+                },
+                "wildcard_routing": {
+                  "extracted_machine": $context.vars.machine_id,
+                  "topic_transformation": {
+                    "from": $context.topic,
+                    "to": "analytics/machines/" & $context.vars.machine_id & "/performance/reports"
+                  }
+                },
+                "machine_data": $
+              }
+
+# Example Input Messages (from different machines):
+#
+# From CNC Machine 001 (OPC UA):
+# Topic: machines/cnc-001/telemetry/data
+# Payload: {
+#   "oee": 0.87,
+#   "temperature": 68.5,
+#   "status": "running"
+# }
+#
+# Wildcard Extraction: machine_id = "cnc-001"
+# 
+# Expected Output:
+# Topic: analytics/machines/cnc-001/performance/reports
+# {
+#   "timestamp": 1730529600000,
+#   "machine_routing": {
+#     "machine_id": "cnc-001",
+#     "machine_type": "cnc",
+#     "analytics_topic": "analytics/machines/cnc-001/performance/reports"
+#   },
+#   "performance": {
+#     "oee": 0.87,
+#     "temperature": 68.5,
+#     "status": "excellent"
+#   },
+#   "wildcard_routing": {
+#     "extracted_machine": "cnc-001",
+#     "topic_transformation": {
+#       "from": "machines/cnc-001/telemetry/data",
+#       "to": "analytics/machines/cnc-001/performance/reports"
+#     }
+#   },
+#   "machine_data": {original_payload}
+# }

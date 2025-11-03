@@ -1,0 +1,219 @@
+description: >
+  Multi-utility energy monitoring across electrical, compressed air, and cooling systems.  
+  Demonstrates array subscription with mixed protocols and different topic depths.
+  Shows facility energy optimization through cross-system correlation.
+
+metadata:
+  name: Energy Management - Multi-Utility Monitoring
+  version: 1.0.0
+
+parameters:
+  electricalOpcuaHost:
+    type: string
+    default: "192.168.120.10"
+    description: "OPC UA server for electrical monitoring system"
+    
+  compressedAirModbusHost:
+    type: string
+    default: "192.168.120.20"
+    description: "Modbus gateway for compressed air system"
+    
+  coolingModbusHost:
+    type: string
+    default: "192.168.120.30"
+    description: "Modbus gateway for cooling system sensors"
+
+resources:
+  # Electrical System Connection
+  electricalConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref electricalOpcuaHost
+        port: 4840
+        
+  # Compressed Air System Connection
+  compressedAirConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Modbus
+      connection:
+        host: !ref compressedAirModbusHost
+        port: 502
+        
+  # Cooling System Connection
+  coolingConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Modbus
+      connection:
+        host: !ref coolingModbusHost
+        port: 502
+
+  # Main Electrical Panel (OPC UA)
+  mainPanelEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref electricalConnection
+      subscribe:
+        nodeId: "ns=2;s=Electrical.MainPanel.Consumption"
+        interval: 5000
+      topic: energy/electrical/main-panel/consumption
+
+  # Production Area Electrical (OPC UA)
+  productionElectricalEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref electricalConnection
+      subscribe:
+        nodeId: "ns=2;s=Electrical.ProductionArea.Consumption"
+        interval: 5000
+      topic: energy/electrical/production-area/consumption
+
+  # Compressor Station 1 (Modbus)
+  compressor1Endpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref compressedAirConnection
+      subscribe:
+        fc: 4
+        address: 100
+        length: 3
+        interval: 10000
+      topic: energy/compressed-air/compressor-1/metrics
+
+  # Compressor Station 2 (Modbus)
+  compressor2Endpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref compressedAirConnection
+      subscribe:
+        fc: 4
+        address: 200
+        length: 3
+        interval: 10000
+      topic: energy/compressed-air/compressor-2/metrics
+
+  # Chiller System A (Modbus)
+  chillerAEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref coolingConnection
+      subscribe:
+        fc: 4
+        address: 10
+        length: 4
+        interval: 15000
+      topic: energy/cooling/systems/chiller-a/status
+
+  # Chiller System B (Modbus)
+  chillerBEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref coolingConnection
+      subscribe:
+        fc: 4
+        address: 50
+        length: 4
+        interval: 15000
+      topic: energy/cooling/systems/chiller-b/status
+
+  # Multi-Utility Energy Analytics
+  energyAnalytics:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          # Array subscription - different utility systems with varying topic depths!
+          - topic: ${Cybus::MqttRoot}/energy/electrical/+area/consumption
+            label: 'elec_{area}'
+          - topic: ${Cybus::MqttRoot}/energy/compressed-air/+compressor/metrics  
+            label: 'air_{compressor}'
+          - topic: ${Cybus::MqttRoot}/energy/cooling/systems/+chiller/status
+            label: 'cool_{chiller}'
+        publish:
+          topic: analytics/energy/facility-optimization
+        rules:
+        - collect: {}  # Aggregate all utility system data
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "triggered_by": $context.topic,
+                "facility_overview": {
+                  "total_utility_points": $count($keys($)),
+                  "electrical_areas": $count($filter($keys($), function($k) { $contains($k, 'elec_') })),
+                  "compressed_air_systems": $count($filter($keys($), function($k) { $contains($k, 'air_') })),
+                  "cooling_systems": $count($filter($keys($), function($k) { $contains($k, 'cool_') }))
+                },
+                "energy_breakdown": {
+                  "electrical_consumption": $filter($, function($v, $k) { $contains($k, 'elec_') }),
+                  "compressed_air_metrics": $filter($, function($v, $k) { $contains($k, 'air_') }),
+                  "cooling_systems_status": $filter($, function($v, $k) { $contains($k, 'cool_') })
+                },
+                "complete_energy_data": $
+              }
+
+# Example Input Messages (from different utility systems):
+#
+# From Electrical System (OPC UA):
+# Topic: energy/electrical/main-panel/consumption
+# Payload: {"power_kw": 285.4, "voltage_v": 415.2, "current_a": 396.7, "frequency_hz": 50.1}
+#
+# From Electrical System (OPC UA):
+# Topic: energy/electrical/production-area/consumption
+# Payload: {"power_kw": 142.8, "voltage_v": 412.9, "current_a": 199.3, "frequency_hz": 49.9}
+#
+# From Compressed Air System (Modbus):
+# Topic: energy/compressed-air/compressor-1/metrics
+# Payload: [8.2, 85, 72]  // [pressure_bar, load_percentage, temperature_c]
+#
+# From Cooling System (Modbus):
+# Topic: energy/cooling/systems/chiller-a/status
+# Payload: [12.5, 85, 1, 68]  // [flow_rate_lps, efficiency_percentage, status, temp_c]
+#
+# After Collect Rule - All Utility Data Aggregated:
+# {
+#   "elec_main-panel": {"power_kw": 285.4, "voltage_v": 415.2, "current_a": 396.7, "frequency_hz": 50.1},
+#   "elec_production-area": {"power_kw": 142.8, "voltage_v": 412.9, "current_a": 199.3, "frequency_hz": 49.9},
+#   "air_compressor-1": [8.2, 85, 72],
+#   "cool_chiller-a": [12.5, 85, 1, 68]
+# }
+#
+# Expected Output (when cooling system data arrives):
+# Topic: analytics/energy/facility-optimization
+# {
+#   "timestamp": 1730529600000,
+#   "triggered_by": "energy/cooling/systems/chiller-a/status",
+#   "facility_overview": {
+#     "total_utility_points": 4,
+#     "electrical_areas": 2,
+#     "compressed_air_systems": 1,
+#     "cooling_systems": 1
+#   },
+#   "energy_breakdown": {
+#     "electrical_consumption": {
+#       "elec_main-panel": {"power_kw": 285.4, "voltage_v": 415.2, "current_a": 396.7, "frequency_hz": 50.1},
+#       "elec_production-area": {"power_kw": 142.8, "voltage_v": 412.9, "current_a": 199.3, "frequency_hz": 49.9}
+#     },
+#     "compressed_air_metrics": {
+#       "air_compressor-1": [8.2, 85, 72]
+#     },
+#     "cooling_systems_status": {
+#       "cool_chiller-a": [12.5, 85, 1, 68]
+#     }
+#   },
+#   "complete_energy_data": {
+#     "elec_main-panel": {"power_kw": 285.4, "voltage_v": 415.2, "current_a": 396.7, "frequency_hz": 50.1},
+#     "elec_production-area": {"power_kw": 142.8, "voltage_v": 412.9, "current_a": 199.3, "frequency_hz": 49.9},
+#     "air_compressor-1": [8.2, 85, 72],
+#     "cool_chiller-a": [12.5, 85, 1, 68]
+#   }
+# }

@@ -1,0 +1,121 @@
+description: >
+  HTTP webhook read with real-world transformation scenarios.
+  Shows converting incoming webhook data to standardized industrial data
+  from web services, IoT devices, and manufacturing systems.
+
+metadata:
+  name: HTTP Read with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  apiBaseUrl:
+    type: string
+    default: "http://192.168.1.100:8080"
+
+resources:
+  httpConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Http
+      connection:
+        host: "192.168.1.100"
+        port: 8080
+
+  # Receive machine status webhooks
+  machineStatusWebhook:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Http
+      connection: !ref httpConnection
+      subscribe:
+        method: "post"
+        path: "/webhook/machine/status"
+      topic: http/machine/status/raw
+
+  # Receive sensor data webhooks
+  sensorDataWebhook:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Http
+      connection: !ref httpConnection
+      subscribe:
+        method: "post"
+        path: "/webhook/sensors/data"
+      topic: http/sensors/data/raw
+
+  # Receive production metrics webhooks
+  productionMetricsWebhook:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Http
+      connection: !ref httpConnection
+      subscribe:
+        method: "post"
+        path: "/webhook/production/metrics"
+      topic: http/production/metrics/raw
+
+  # Transform HTTP API responses to standard manufacturing format
+  httpDataTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert machine status API response
+      - subscribe:
+          endpoint: !ref machineStatusWebhook
+        publish:
+          topic: manufacturing/machine/status
+        rules:
+        - transform:
+            expression: |
+              {
+                "machine_id": $.machine_id,
+                "status": $.state,
+                "error_count": $.error_count,
+                "timestamp": $now()
+              }
+
+      # Convert sensor data from IoT API
+      - subscribe:
+          endpoint: !ref sensorDataWebhook
+        publish:
+          topic: manufacturing/sensors/readings
+        rules:
+        - transform:
+            expression: |
+              {
+                "sensor_id": $.sensors[0].id,
+                "temperature": $.sensors[0].value,
+                "unit": $.sensors[0].unit,
+                "timestamp": $now()
+              }
+
+      # Convert production metrics from MES API
+      - subscribe:
+          endpoint: !ref productionMetricsWebhook
+        publish:
+          topic: manufacturing/production/kpi
+        rules:
+        - transform:
+            expression: |
+              {
+                "production_line": $.payload.line_id,
+                "parts_produced": $.payload.current_shift.parts_completed,
+                "target_parts": $.payload.current_shift.target_parts,
+                "good_parts": $.payload.quality.good_parts,
+                "defect_parts": $.payload.quality.defect_parts,
+                "timestamp": $now()
+              }
+
+# Simple Real-World Examples:
+#
+# 1. Machine Status: {"machine_id": "LINE_001", "state": "RUNNING", "error_count": 0}
+#    → {"machine_id": "LINE_001", "status": "RUNNING", "error_count": 0}
+#
+# 2. Sensor Data: {"sensors": [{"id": "T001", "value": 23.5, "unit": "°C"}]}
+#    → {"sensor_id": "T001", "temperature": 23.5, "unit": "°C"}
+#
+# 3. Production Data: {"payload": {"current_shift": {"parts_completed": 95}, "quality": {"good_parts": 92}}}
+#    → {"parts_produced": 95, "good_parts": 92}

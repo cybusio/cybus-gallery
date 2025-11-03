@@ -1,0 +1,135 @@
+description: >
+  ADS/TwinCAT read with real-world transformation scenarios.
+  Shows converting TwinCAT PLC data to standardized industrial data
+  from Beckhoff automation systems and EtherCAT devices.
+
+metadata:
+  name: ADS Read with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  adsHost:
+    type: string
+    default: "192.168.1.40"
+  
+  adsLocalNetId:
+    type: string
+    default: "192.168.1.100.1.1"
+    
+  adsNetId:
+    type: string
+    default: "192.168.1.40.1.1"
+
+resources:
+  adsConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Ads
+      connection:
+        localAddress: !ref adsLocalNetId
+        localPort: 32000
+        host: !ref adsHost
+        routerTcpPort: 48898
+        port: 851
+        netId: !ref adsNetId
+
+  # Read machine status from TwinCAT
+  machineStatusRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Ads
+      connection: !ref adsConnection
+      subscribe:
+        symbolName: "MAIN.stMachineStatus"
+        interval: 2000
+      topic: ads/machine/status/raw
+
+  # Read servo drive data
+  servoDriveRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Ads
+      connection: !ref adsConnection
+      subscribe:
+        symbolName: "MAIN.stServoDrive"
+        interval: 1000
+      topic: ads/servo/data/raw
+
+  # Read production data structure
+  productionDataRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Ads
+      connection: !ref adsConnection
+      subscribe:
+        symbolName: "MAIN.stProductionData"
+        interval: 5000
+      topic: ads/production/data/raw
+
+  # Transform ADS data to standard manufacturing format
+  adsDataTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert TwinCAT machine status to standard format
+      - subscribe:
+          endpoint: !ref machineStatusRead
+        publish:
+          topic: manufacturing/machine/status
+        rules:
+        - transform:
+            expression: |
+              {
+                "machine_id": "TWINCAT_001",
+                "running": $.bRunning,
+                "emergency_stop": $.bEmergencyStop,
+                "temperature_celsius": $.nTemperature / 10,
+                "timestamp": $now()
+              }
+
+      # Convert servo drive data from TwinCAT format
+      - subscribe:
+          endpoint: !ref servoDriveRead
+        publish:
+          topic: manufacturing/servo/status
+        rules:
+        - transform:
+            expression: |
+              {
+                "drive_id": "SERVO_X_AXIS",
+                "position_mm": $.rActualPosition,
+                "velocity_mmps": $.rActualVelocity,
+                "enabled": $.bEnabled,
+                "timestamp": $now()
+              }
+
+      # Convert production data from TwinCAT structure
+      - subscribe:
+          endpoint: !ref productionDataRead
+        publish:
+          topic: manufacturing/production/metrics
+        rules:
+        - transform:
+            expression: |
+              {
+                "production_line": "BECKHOFF_LINE_001",
+                "good_parts": $.nGoodParts,
+                "reject_parts": $.nRejectParts,
+                "part_number": $.sPartNumber,
+                "cycle_time_ms": $.nCycleTimeMs,
+                "timestamp": $now()
+              }
+
+# Simple Real-World Examples:
+#
+# 1. Machine Status: {"bRunning": true, "bEmergencyStop": false, "nTemperature": 235}
+#    → {"running": true, "emergency_stop": false, "temperature_celsius": 23.5}
+#
+# 2. Servo Drive: {"rActualPosition": 125.5, "rActualVelocity": 50.0, "bEnabled": true}
+#    → {"position_mm": 125.5, "velocity_mmps": 50.0, "enabled": true}
+#
+# 3. Production Data: {"nGoodParts": 485, "nRejectParts": 15, "sPartNumber": "PART_A123"}
+#    → {"good_parts": 485, "reject_parts": 15, "part_number": "PART_A123"}

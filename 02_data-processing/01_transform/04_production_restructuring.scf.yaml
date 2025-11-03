@@ -1,0 +1,137 @@
+description: >
+  Production data restructuring using transform rules for MES integration.
+  Converts flat production data from legacy systems into hierarchical format
+  required by modern Manufacturing Execution Systems and ERP integration.
+
+metadata:
+  name: Production Data Restructuring - MES System Integration
+  version: 1.0.0
+
+parameters:
+  mesServerHost:
+    type: string
+    default: "192.168.150.10"
+    description: "MES system OPC UA server"
+    
+  productionDatabaseHost:
+    type: string
+    default: "192.168.150.20"
+    description: "Production database gateway"
+
+resources:
+  # MES System Connection
+  mesConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref mesServerHost
+        port: 4840
+
+  # Production Database Connection (simulated as OPC UA)
+  productionDbConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref productionDatabaseHost
+        port: 4840
+
+  # Production Line Status - Flat Data Format
+  productionLineStatus:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref mesConnection
+      subscribe:
+        nodeId: "ns=2;s=Production.LineA.StatusData"
+        interval: 15000
+      topic: production/line-a/status/flat
+
+  # Quality Control Results - Legacy Format  
+  qualityControlResults:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref productionDbConnection
+      subscribe:
+        nodeId: "ns=2;s=QualityControl.InspectionResults.Flat"
+        interval: 20000
+      topic: quality/inspection/results/flat
+
+  # Production Data Restructuring - Flat to Hierarchical
+  productionDataRestructuring:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/production/line-a/status/flat
+        publish:
+          topic: mes/production/line-a/structured-data
+        rules:
+        - transform:
+            expression: |
+              {
+                /* Create hierarchical line information object */
+                "line_info": {
+                  "line_id": "LINE-A",                       /* Static line identifier */
+                  "status": $.status = 1 ? "running" : "stopped"  /* Convert numeric status to descriptive text */
+                },
+                
+                /* Group production metrics together */
+                "production": {
+                  "units_produced": $.units_hour,            /* Direct field mapping */
+                  "target_units": $.target_hour,             /* Direct field mapping */
+                  "efficiency": $.units_hour / $.target_hour * 100  /* Calculate efficiency percentage */
+                },
+                
+                /* Create array of machine objects from flat individual fields */
+                "machines": [
+                  {
+                    /* First CNC machine object */
+                    "machine_id": $.cnc1_id,                 /* Machine identifier from input */
+                    "status": $.cnc1_status = 1 ? "running" : "stopped"  /* Convert status code to text */
+                  },
+                  {
+                    /* Second CNC machine object */
+                    "machine_id": $.cnc2_id,                 /* Machine identifier from input */
+                    "status": $.cnc2_status = 1 ? "running" : "stopped"  /* Convert status code to text */
+                  }
+                ],
+                
+                /* Add processing timestamp */
+                "timestamp": $now()                          /* Current timestamp when restructuring occurred */
+              }
+# Example Input Message (flat production data):
+#
+# Topic: production/line-a/status/flat
+# {
+#   "status": 1, "units_hour": 95, "target_hour": 100,
+#   "cnc1_id": "CNC-001", "cnc1_status": 1,
+#   "cnc2_id": "CNC-002", "cnc2_status": 0
+# }
+#   "cnc2_id": "CNC-002", "cnc2_status": 1, "cnc2_program": "PART_B_V1",
+#
+# Expected Output:
+# Topic: mes/production/line-a/structured-data
+# {
+#   "line_info": {
+#     "line_id": "LINE-A",
+#     "status": "running"
+#   },
+#   "production": {
+#     "units_produced": 95,
+#     "target_units": 100,
+#     "efficiency": 95
+#   },
+#   "machines": [
+#     {"machine_id": "CNC-001", "status": "running"},
+#     {"machine_id": "CNC-002", "status": "stopped"}
+#   ],
+#   "timestamp": 1730529600000
+# }
+
+# KEY CONCEPTS:
+# ✅ Flat to hierarchical: Organizing related fields into objects
+# ✅ Array creation: Building machine lists from individual fields  
+# ✅ Data calculations: Computing efficiency from raw values

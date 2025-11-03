@@ -1,0 +1,113 @@
+
+description: >
+
+  OPC UA Server Example Commissioning File
+  Cybus Learn - How to set up the integrated Connectware OPC UA server
+  https://www.cybus.io/learn/how-to-set-up-the-integrated-connectware-opc-ua-server/
+
+metadata:
+
+  name: OPC UA Server Example Commissioning File
+  version: 1.0.0
+  icon: https://www.cybus.io/wp-content/uploads/2019/03/Cybus-logo-Claim-lang.svg
+  provider: cybus
+  homepage: https://www.cybus.io
+
+resources:
+
+#------------------------------------------------------------------------
+# OPC UA Server
+#------------------------------------------------------------------------
+
+  opcuaServer:
+    type: Cybus::Server::Opcua
+    properties:
+      port: 4841
+      resourcePath: /UA/CybusOpcuaServer
+      alternateHostname: <INSERT_SERVER_IP>
+      applicationUri: 'urn:cybus:opcua:server:1'
+      allowAnonymous: true
+      securityPolicies: ["None", "Basic256Sha256"]
+      securityModes: ["None", "SignAndEncrypt"]
+
+#------------------------------------------------------------------------
+# Parent Nodes
+#------------------------------------------------------------------------
+
+  1_root:
+    type: Cybus::Node::Opcua
+    properties:
+      nodeType: Object
+      parent: !ref opcuaServer
+      nodeId: ns=1;s=1_root
+      browseName: "root"
+
+  1.1_DataNodes:
+    type: Cybus::Node::Opcua
+    properties:
+      nodeType: Object
+      parent: !ref 1_root
+      nodeId: ns=1;s=1.1_DataNodes
+      browseName: "DataNodes"
+
+#------------------------------------------------------------------------
+# Variable Nodes
+#------------------------------------------------------------------------
+
+  1.1.1_Boolean:
+    type: Cybus::Node::Opcua
+    properties:
+      nodeType: Variable 
+      parent: !ref 1.1_DataNodes
+      operation: serverProvides
+      nodeId: ns=1;s=1.1.1_Boolean
+      browseName: Boolean
+      dataType: Boolean
+      initialValue: false
+
+  1.1.2_Int32:
+    type: Cybus::Node::Opcua
+    properties:
+      nodeType: Variable 
+      parent: !ref 1.1_DataNodes
+      operation: serverReceives
+      nodeId: ns=1;s=1.1.2_Int32
+      browseName: Int32
+      dataType: Int32
+      initialValue: 0
+
+  1.1.3_String:
+    type: Cybus::Node::Opcua
+    properties:
+      nodeType: Variable 
+      parent: !ref 1.1_DataNodes
+      operation: serverProvidesAndReceives
+      nodeId: ns=1;s=1.1.3_String
+      browseName: String
+      dataType: String
+      initialValue: "intial"
+
+#------------------------------------------------------------------------
+# Mapping - Mqtt
+#------------------------------------------------------------------------
+
+  MqttMapping:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+        - subscribe:
+            topic: "opcua/provides/boolean"
+          publish:
+            endpoint: !ref 1.1.1_Boolean
+        - subscribe:
+            endpoint: !ref 1.1.2_Int32
+          publish:
+            topic: "opcua/receives/int32"
+        - subscribe:
+            endpoint: !ref 1.1.3_String
+          publish:
+            topic: "opcua/receives/string"
+        - subscribe:
+            topic: "opcua/provides/string"
+          publish:
+            endpoint: !ref 1.1.3_String

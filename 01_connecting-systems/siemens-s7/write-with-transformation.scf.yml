@@ -1,0 +1,148 @@
+description: >
+  Siemens S7 write with input format transformation.
+  Shows converting standard manufacturing commands to S7-specific
+  data block and memory formats for controlling Siemens PLCs.
+
+metadata:
+  name: Siemens S7 Write with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  s7Host:
+    type: string
+    default: "192.168.1.30"
+
+resources:
+  s7Connection:
+    type: Cybus::Connection
+    properties:
+      protocol: S7
+      connection:
+        host: !ref s7Host
+        port: 102
+        rack: 0
+        slot: 1
+
+  # Write setpoint values to data block
+  setpointWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: S7
+      connection: !ref s7Connection
+      write:
+        address: "DB5,REAL0"
+      topic: s7/setpoint/write
+
+  # Write production targets to data block
+  productionTargetWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: S7
+      connection: !ref s7Connection
+      write:
+        address: "DB6,DINT0"
+      topic: s7/production/target/write
+
+  # Write control commands to memory bits
+  controlCommandsWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: S7
+      connection: !ref s7Connection
+      write:
+        address: "M200.0"
+      topic: s7/control/start/write
+
+  controlResetWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: S7
+      connection: !ref s7Connection
+      write:
+        address: "M200.1"
+      topic: s7/control/reset/write
+
+  # Transform standard input to S7-specific formats
+  commandTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert temperature setpoint to S7 REAL format
+      - subscribe:
+          topic: manufacturing/temperature/setpoint
+        publish:
+          endpoint: !ref setpointWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert standard temperature setpoint to S7 REAL */
+              /* Input: {"temperature_celsius": 23.5, "zone": "production"} */
+              /* Output: 23.5 (S7 REAL data type) */
+              $.temperature_celsius
+
+      # Convert production target to S7 DINT format
+      - subscribe:
+          topic: manufacturing/production/target
+        publish:
+          endpoint: !ref productionTargetWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert production target to S7 DINT (32-bit integer) */
+              /* Input: {"target_parts": 1500, "shift": "day"} */
+              /* Output: 1500 (S7 DINT data type) */
+              $.target_parts
+
+      # Convert machine start command to S7 bit
+      - subscribe:
+          topic: manufacturing/machine/control
+        publish:
+          endpoint: !ref controlCommandsWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert start command to S7 bit */
+              /* Input: {"action": "start", "mode": "auto"} */
+              /* Output: true (S7 BOOL for M200.0) */
+              $.action = "start"
+
+      # Convert reset command to S7 bit
+      - subscribe:
+          topic: manufacturing/machine/control
+        publish:
+          endpoint: !ref controlResetWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert reset command to S7 bit */
+              /* Input: {"action": "reset", "clear_alarms": true} */
+              /* Output: true (S7 BOOL for M200.1) */
+              $.action = "reset" and $.clear_alarms
+
+# Input Format Examples:
+#
+# 1. Temperature Setpoint:
+#    Input: {"temperature_celsius": 23.5, "zone": "production"}
+#    S7 Output: 23.5 → DB5,REAL0
+#
+# 2. Production Target:
+#    Input: {"target_parts": 1500, "shift": "day"}
+#    S7 Output: 1500 → DB6,DINT0
+#
+# 3. Machine Control:
+#    Input: {"action": "start", "mode": "auto"}
+#    S7 Output: true → M200.0 (start bit)
+#
+# 4. Reset Command:
+#    Input: {"action": "reset", "clear_alarms": true}
+#    S7 Output: true → M200.1 (reset bit)
+
+# Key Concepts:
+# ✅ S7 Data Types: Converting JSON → S7 REAL, DINT, BOOL data types
+# ✅ Data Block Addressing: Writing structured data to S7 data blocks (DB)
+# ✅ Memory Bit Control: Setting individual control bits in memory areas (M)
+# ✅ Command Translation: Human-readable commands → S7 PLC control logic
+# ✅ Address Mapping: Standard topics → specific S7 memory addresses

@@ -1,0 +1,137 @@
+description: >
+  Modbus TCP write with input format transformation.
+  Shows converting standard manufacturing commands to protocol-specific
+  register formats for controlling PLCs and industrial equipment.
+
+metadata:
+  name: Modbus Write with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  plcHost:
+    type: string
+    default: "192.168.1.10"
+    description: "PLC IP address"
+
+resources:
+  modbusConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Modbus
+      connection:
+        host: !ref plcHost
+        port: 502
+
+  # Write setpoint temperature (convert °C to 0.1°C units)
+  temperatureSetpointWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref modbusConnection
+      write:
+        fc: 6
+        address: 300
+        length: 1
+        dataType: int16BE
+      topic: plc/temperature/setpoint/write
+
+  # Write production target (32-bit to 2 registers)
+  productionTargetWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref modbusConnection
+      write:
+        fc: 16
+        address: 400
+        length: 2
+        dataType: int16BE
+      topic: plc/production/target/write
+
+  # Write control commands (coils)
+  controlCommandsWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref modbusConnection
+      write:
+        fc: 15
+        address: 100
+        length: 4
+        dataType: boolean
+      topic: plc/control/commands/write
+
+  # Transform standard input to PLC-specific formats
+  commandTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert temperature setpoint from Celsius to PLC format (0.1°C)
+      - subscribe:
+          topic: manufacturing/temperature/setpoint
+        publish:
+          endpoint: !ref temperatureSetpointWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert standard temperature command to PLC format */
+              /* Input: {"temperature_celsius": 25.5} */
+              /* Output: 255 (25.5 * 10 for 0.1°C units) */
+              $round($.temperature_celsius * 10)
+
+      # Convert production target to 32-bit register format
+      - subscribe:
+          topic: manufacturing/production/target
+        publish:
+          endpoint: !ref productionTargetWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert production target to two 16-bit registers */
+              /* Input: {"target_parts": 100000} */
+              /* Output: [1, 34464] (high word, low word) */
+              [
+                $floor($.target_parts / 65536),
+                $.target_parts % 65536
+              ]
+
+      # Convert machine commands to control bits
+      - subscribe:
+          topic: manufacturing/machine/control
+        publish:
+          endpoint: !ref controlCommandsWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert standard machine commands to PLC control bits */
+              /* Input: {"start": true, "reset": false, "mode": "auto", "enable": true} */
+              /* Output: [true, false, true, true] (start, reset, auto_mode, enable) */
+              [
+                $.start,
+                $.reset, 
+                $.mode = "auto",
+                $.enable
+              ]
+
+# Input Format Examples:
+#
+# 1. Temperature Setpoint:
+#    Input: {"temperature_celsius": 23.5}
+#    PLC Output: 235 (23.5 * 10)
+#
+# 2. Production Target:
+#    Input: {"target_parts": 100000} 
+#    PLC Output: [1, 34464] (32-bit split to two 16-bit registers)
+#
+# 3. Machine Control:
+#    Input: {"start": true, "reset": false, "mode": "auto", "enable": true}
+#    PLC Output: [true, false, true, true]
+
+# Key Concepts:
+# ✅ Unit Conversion: Standard units → PLC-specific scaling
+# ✅ Data Type Mapping: JSON → Modbus register formats  
+# ✅ Multi-Register Values: 32-bit numbers → two 16-bit registers
+# ✅ Command Translation: Human-readable → PLC control bits

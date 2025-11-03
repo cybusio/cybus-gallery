@@ -1,0 +1,166 @@
+description: >
+  Multi-line sensor data collection across the entire factory.
+  Monitor temperature, vibration, and pressure sensors from all production lines.
+  Demonstrates multi-level wildcards for hierarchical sensor networks.
+
+metadata:
+  name: Factory-Wide Sensor Monitoring - Multi-Line Analytics
+  version: 1.0.0
+
+parameters:
+  modbusGatewayHost:
+    type: string  
+    default: "192.168.1.100"
+    description: "Modbus gateway for sensor networks"
+
+resources:
+  # Modbus Connection for Sensor Networks
+  sensorNetworkConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Modbus
+      connection:
+        host: !ref modbusGatewayHost
+        port: 502
+
+  # =============================================================================
+  # MULTI-LEVEL WILDCARD SCALABILITY DEMONSTRATION
+  # =============================================================================
+  # This SCF demonstrates multi-level wildcards for hierarchical sensor networks:
+  #
+  # Wildcard Pattern: factory/production/+line/sensors/+sensor_type
+  # 
+  # CURRENT ENDPOINTS follow this pattern:
+  # - factory/production/line-A/sensors/temperature
+  # - factory/production/line-A/sensors/vibration/axis-x  
+  # - factory/production/line-B/sensors/temperature
+  # - factory/production/line-B/sensors/pressure
+  #
+  # EXPANSION POSSIBILITIES: You could add entire new lines and sensor types:
+  # - factory/production/line-C/sensors/temperature (New Production Line C)
+  # - factory/production/line-C/sensors/humidity (New sensor type)
+  # - factory/production/line-D/sensors/noise (Line D with noise monitoring)
+  # - factory/production/pilot-line/sensors/flow (Pilot line with flow sensors)
+  #
+  # ALL would be automatically captured by: factory/production/+line/sensors/+sensor_type
+  # =============================================================================
+
+  # Line A Temperature Sensors
+  lineATemperatureSensor:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref sensorNetworkConnection
+      subscribe:
+        fc: 3
+        address: 100
+        length: 2
+        interval: 5000
+      topic: factory/production/line-A/sensors/temperature
+
+  lineAVibrationSensor:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref sensorNetworkConnection
+      subscribe:
+        fc: 3
+        address: 200
+        length: 3
+        interval: 2000
+      topic: factory/production/line-A/sensors/vibration/axis-x
+
+  # Line B Temperature Sensors
+  lineBTemperatureSensor:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref sensorNetworkConnection
+      subscribe:
+        fc: 3
+        address: 300
+        length: 2
+        interval: 5000
+      topic: factory/production/line-B/sensors/temperature
+
+  lineBPressureSensor:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref sensorNetworkConnection
+      subscribe:
+        fc: 3
+        address: 400
+        length: 1
+        interval: 3000
+      topic: factory/production/line-B/sensors/hydraulic-pressure
+
+  # Assembly Line C Sensors
+  lineCVibrationSensor:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Modbus
+      connection: !ref sensorNetworkConnection
+      subscribe:
+        fc: 3
+        address: 500
+        length: 3
+        interval: 1000
+      topic: factory/production/line-C/sensors/vibration/spindle
+
+  # Multi-Line Sensor Data Aggregation
+  factoryWideSensorMonitoring:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          # Multi-level wildcard: ${Cybus::MqttRoot}/factory/production/+line/sensors/#
+          # Matches ANY sensor from ANY production line:
+          # - ${Cybus::MqttRoot}/factory/production/line-A/sensors/temperature
+          # - ${Cybus::MqttRoot}/factory/production/line-B/sensors/hydraulic-pressure  
+          # - ${Cybus::MqttRoot}/factory/production/line-C/sensors/vibration/spindle
+          topic: ${Cybus::MqttRoot}/factory/production/+line/sensors/#
+        publish:
+          topic: analytics/factory/sensor-telemetry
+        rules:
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "line": $context.vars.line,
+                "sensor_type": $split($context.topic, "/")[-1],
+                "value": $type($) = "array" ? $[0] : $.value,
+                "full_topic": $context.topic
+              }
+
+# Example Input Messages (from Modbus sensors):
+#
+# Topic: factory/production/line-A/sensors/temperature
+# Payload: [72.5, 1]  // [temperature_value, status_register]
+#
+# Topic: factory/production/line-B/sensors/hydraulic-pressure
+# Payload: [185.2]    // [pressure_value]
+#
+# Topic: factory/production/line-C/sensors/vibration/spindle  
+# Payload: [2.8, 3.1, 0.9]  // [x_axis, y_axis, z_axis]
+#
+# Expected Output:
+# Topic: analytics/factory/sensor-telemetry
+# 
+# For temperature sensor:
+# {
+#   "timestamp": 1730115600000,
+#   "line": "line-A",
+#   "sensor_type": "temperature", 
+#   "value": 72.5,
+#   "full_topic": "factory/production/line-A/sensors/temperature"
+# }
+#
+# For vibration sensor:
+# {
+#   "timestamp": 1730115600000,
+#   "line": "line-C",
+#   "sensor_type": "spindle",
+#   "value": 2.8,
+#   "full_topic": "factory/production/line-C/sensors/vibration/spindle"
+# }

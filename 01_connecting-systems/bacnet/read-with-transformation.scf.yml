@@ -1,0 +1,122 @@
+description: >
+  BACnet read with real-world transformation scenarios.
+  Shows converting BACnet object values to standardized building automation
+  and HVAC data from BACnet-enabled devices and systems.
+
+metadata:
+  name: BACnet Read with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  deviceInstance:
+    type: number
+    default: 2000
+    
+  deviceAddress:
+    type: string
+    default: "192.168.1.50:47808"
+
+resources:
+  bacnetConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Bacnet
+      connection:
+        deviceInstance: !ref deviceInstance
+        deviceAddress: !ref deviceAddress
+        localPort: 48808
+
+  # Read temperature sensors
+  temperatureSensorRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Bacnet
+      connection: !ref bacnetConnection
+      subscribe:
+        objectType: "analog-input"
+        objectInstance: 1
+        property: "present-value"
+        interval: 5000
+      topic: bacnet/temperature/raw
+
+  # Read HVAC system status
+  hvacStatusRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Bacnet
+      connection: !ref bacnetConnection
+      subscribe:
+        objectType: "binary-value"
+        objectInstance: 10
+        property: "present-value"
+        interval: 3000
+      topic: bacnet/hvac/status/raw
+
+  # Read setpoint values
+  setpointRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Bacnet
+      connection: !ref bacnetConnection
+      subscribe:
+        objectType: "analog-value"
+        objectInstance: 5
+        property: "present-value"
+        interval: 10000
+      topic: bacnet/setpoint/raw
+
+  # Transform BACnet data to standard building automation format
+  bacnetDataTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert BACnet temperature to standard format
+      - subscribe:
+          endpoint: !ref temperatureSensorRead
+        publish:
+          topic: building/hvac/temperature
+        rules:
+        - transform:
+            expression: |
+              {
+                "sensor_id": "TEMP_AHU_001",
+                "temperature_celsius": $.value,
+                "timestamp": $now()
+              }
+
+      # Convert BACnet HVAC status to standard format
+      - subscribe:
+          endpoint: !ref hvacStatusRead
+        publish:
+          topic: building/hvac/system_status
+        rules:
+        - transform:
+            expression: |
+              {
+                "system_id": "AHU_001",
+                "fan_running": $.value,
+                "timestamp": $now()
+              }
+
+      # Convert BACnet setpoint to standard format
+      - subscribe:
+          endpoint: !ref setpointRead
+        publish:
+          topic: building/hvac/setpoint
+        rules:
+        - transform:
+            expression: |
+              {
+                "zone_id": "ZONE_001",
+                "setpoint_celsius": $.value,
+                "timestamp": $now()
+              }
+
+# Simple Real-World Examples:
+#
+# 1. Temperature Reading: {"value": 22.5} → {"temperature_celsius": 22.5}
+# 2. HVAC Status: {"value": true} → {"fan_running": true}
+# 3. Setpoint: {"value": 22.0} → {"setpoint_celsius": 22.0}

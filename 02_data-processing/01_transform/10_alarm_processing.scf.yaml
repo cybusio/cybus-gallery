@@ -1,0 +1,117 @@
+description: >
+  Alarm data processing and categorization for maintenance systems.
+  Standardizes alarm messages from various equipment sources into 
+  consistent format for SCADA and maintenance management systems.
+
+metadata:
+  name: Alarm Processing - Message Standardization
+  version: 1.0.0
+
+parameters:
+  scadaHost:
+    type: string
+    default: "192.168.4.30"
+    description: "SCADA system for alarm collection"
+
+resources:
+  # SCADA Connection
+  scadaConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref scadaHost
+        port: 4840
+
+  # Equipment Alarms Endpoint
+  equipmentAlarms:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref scadaConnection
+      subscribe:
+        nodeId: "ns=2;s=AlarmSystem.ActiveAlarms"
+        interval: 5000
+      topic: scada/alarms/raw-events
+
+  # Alarm Processing and Categorization
+  alarmProcessing:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/scada/alarms/raw-events
+        publish:
+          topic: maintenance/alarms/processed
+        rules:
+        - transform:
+            expression: |
+              {
+                /* Direct field mappings for alarm identification */
+                "alarm_id": $.alarm_code,                    /* Unique alarm identifier */
+                "equipment_id": $.equipment_tag,             /* Equipment that generated alarm */
+                "alarm_text": $.message,                     /* Original alarm message text */
+                
+                /* Convert numeric priority to descriptive severity levels */
+                "severity": $.priority = 1 ? "critical" :            /* Priority 1 = critical */
+                           $.priority = 2 ? "high" :                /* Priority 2 = high */
+                           $.priority = 3 ? "medium" : "low",       /* Priority 3 = medium, others = low */
+                
+                /* Analyze message text to automatically categorize alarm type */
+                "category": $contains($.message, "temperature") ? "thermal" :     /* Check for temperature keywords */
+                           $contains($.message, "pressure") ? "hydraulic" :       /* Check for pressure keywords */
+                           $contains($.message, "motor") ? "mechanical" :          /* Check for motor keywords */
+                           $contains($.message, "communication") ? "network" : "general",  /* Network or general category */
+                
+                /* Determine required maintenance response time based on priority */
+                "maintenance_action": $.priority = 1 ? "immediate" :             /* Critical: immediate action */
+                                     $.priority = 2 ? "within_hour" :            /* High: within 1 hour */
+                                     $.priority = 3 ? "next_shift" : "scheduled", /* Medium: next shift, Low: scheduled */
+                
+                /* Auto-acknowledge low priority alarms (priority 3 or higher) */
+                "auto_acknowledge": $.priority >= 3,            /* Boolean: true if priority ≥ 3 */
+                
+                /* Escalate if high priority alarm persists longer than 5 minutes (300 seconds) */
+                "escalation_required": $.priority <= 2 and $.duration > 300,  /* Boolean AND: high priority AND long duration */
+                
+                /* Convert numeric state to descriptive status */
+                "alarm_state": $.state = 1 ? "active" : "acknowledged",  /* State 1 = active, others = acknowledged */
+                
+                /* Processing timestamp */
+                "timestamp": $now()                          /* Current timestamp when alarm was processed */
+              }
+
+# Example Input Message:
+#
+# Topic: scada/alarms/raw-events
+# {
+#   "alarm_code": "A001-TH-01",
+#   "equipment_tag": "PMP-001", 
+#   "message": "Motor temperature high - 95°C",
+#   "priority": 2,
+#   "state": 1,
+#   "duration": 180,
+#   "operator": "OP-15"
+# }
+
+# Expected Output:
+# Topic: maintenance/alarms/processed  
+# {
+#   "alarm_id": "A001-TH-01",
+#   "equipment_id": "PMP-001",
+#   "alarm_text": "Motor temperature high - 95°C",
+#   "severity": "high",
+#   "category": "thermal", 
+#   "maintenance_action": "within_hour",
+#   "auto_acknowledge": false,
+#   "escalation_required": false,
+#   "alarm_state": "active",
+#   "timestamp": 1730529600000
+# }
+
+# KEY CONCEPTS:
+# ✅ Text analysis: Using $contains() to categorize alarms by content
+# ✅ Priority mapping: Converting numeric codes to descriptive levels
+# ✅ Conditional logic: Determining maintenance actions based on severity
+# ✅ Duration-based rules: Escalation logic for persistent alarms
+# ✅ State management: Tracking alarm acknowledgment status

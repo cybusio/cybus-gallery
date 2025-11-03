@@ -1,0 +1,114 @@
+description: >
+  Energy consumption alert routing based on usage patterns and efficiency thresholds.
+  Uses setContextVars to dynamically route energy alerts to appropriate departments
+  based on consumption zones, efficiency levels, and cost impact categories.
+
+metadata:
+  name: Energy Alert Routing - Department-Specific Notifications
+  version: 1.0.0
+
+parameters:
+  energyOpcuaHost:
+    type: string
+    default: "192.168.130.30"
+    description: "OPC UA server for energy management system"
+
+resources:
+  # Energy Management System Connection
+  energyConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref energyOpcuaHost
+        port: 4840
+
+  # Energy Consumption Monitoring Endpoint
+  energyConsumptionEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref energyConnection
+      subscribe:
+        nodeId: "ns=4;s=Energy.ConsumptionAnalysis"
+        interval: 15000
+      topic: energy/consumption/analysis
+
+  # Energy Alert Routing Based on Consumption Patterns
+  energyAlertRouting:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/energy/consumption/analysis
+        publish:
+          topic: 'alerts/energy/{department}/{impact}/optimization'
+        rules:
+        - setContextVars:
+            vars:
+              department: |
+                $.zone.area = "production" ? "production-ops" :
+                $.zone.area = "facilities" ? "facilities-mgmt" :
+                $.zone.area = "office" ? "admin" : "energy-mgmt"
+              impact: |
+                $.analysis.efficiency_drop > 20 ? "critical" :
+                $.analysis.cost_increase > 15 ? "high" :
+                $.analysis.efficiency_drop > 10 ? "medium" : "low"
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "dynamic_routing": {
+                  "department": $context.vars.department,
+                  "impact": $context.vars.impact,
+                  "final_topic": "alerts/energy/" & $context.vars.department & "/" & $context.vars.impact & "/optimization"
+                },
+                "energy_data": {
+                  "zone": $.zone.area,
+                  "efficiency_drop": $.analysis.efficiency_drop,
+                  "cost_increase": $.analysis.cost_increase
+                },
+                "setContextVars_logic": {
+                  "department_logic": "zone.area='" & $.zone.area & "' → " & $context.vars.department,
+                  "impact_logic": "efficiency_drop=" & $.analysis.efficiency_drop & "%, cost_increase=" & $.analysis.cost_increase & "% → " & $context.vars.impact
+                },
+                "original_data": $
+              }
+
+# Example Input Message (from energy management system):
+#
+# Topic: energy/consumption/analysis
+# Payload: {
+#   "zone": {
+#     "area": "production"
+#   },
+#   "analysis": {
+#     "efficiency_drop": 15.5,
+#     "cost_increase": 18.3
+#   }
+# }
+#
+# SetContextVars Logic:
+# - department = "production-ops" (zone.area = "production")
+# - impact = "high" (cost_increase = 18.3, which is > 15)
+#
+# Expected Output:
+# Topic: alerts/energy/production-ops/high/optimization
+# {
+#   "timestamp": 1730529600000,
+#   "dynamic_routing": {
+#     "department": "production-ops",
+#     "impact": "high",
+#     "final_topic": "alerts/energy/production-ops/high/optimization"
+#   },
+#   "energy_data": {
+#     "zone": "production",
+#     "efficiency_drop": 15.5,
+#     "cost_increase": 18.3
+#   },
+#   "setContextVars_logic": {
+#     "department_logic": "zone.area='production' → production-ops",
+#     "impact_logic": "efficiency_drop=15.5%, cost_increase=18.3% → high"
+#   },
+#   "original_data": {original_payload}
+# }

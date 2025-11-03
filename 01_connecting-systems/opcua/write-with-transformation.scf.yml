@@ -1,0 +1,139 @@
+description: >
+  OPC UA write with input format transformation.
+  Shows converting standard manufacturing commands to OPC UA node writes
+  for controlling industrial equipment and process variables.
+
+metadata:
+  name: OPC UA Write with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  opcuaHost:
+    type: string
+    default: "192.168.1.20"
+  
+  opcuaPort:
+    type: integer
+    default: 4840
+
+resources:
+  opcuaConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref opcuaHost
+        port: !ref opcuaPort
+
+  # Write temperature setpoint
+  temperatureSetpointWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref opcuaConnection
+      write:
+        nodeId: "ns=3;s=AirConditioner_1.TemperatureSetPoint"
+      topic: opcua/temperature/setpoint/write
+
+  # Write production parameters
+  productionParametersWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref opcuaConnection
+      write:
+        nodeId: "ns=2;s=Production.Parameters"
+      topic: opcua/production/parameters/write
+
+  # Write machine control commands
+  machineControlWrite:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref opcuaConnection
+      write:
+        nodeId: "ns=2;s=Machine.Control"
+      topic: opcua/machine/control/write
+
+  # Transform standard input to OPC UA formats
+  commandTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert temperature command to OPC UA format
+      - subscribe:
+          topic: manufacturing/hvac/temperature/setpoint
+        publish:
+          endpoint: !ref temperatureSetpointWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert standard HVAC command to OPC UA temperature setpoint */
+              /* Input: {"setpoint_celsius": 22.5, "zone": "production_floor"} */
+              /* Output: 22.5 (direct value for OPC UA node) */
+              $.setpoint_celsius
+
+      # Convert production parameters to OPC UA structure
+      - subscribe:
+          topic: manufacturing/production/parameters
+        publish:
+          endpoint: !ref productionParametersWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert production parameters to OPC UA structure */
+              /* Input: {"speed_percent": 85, "target_rate": 120, "quality_threshold": 95} */
+              /* Output: OPC UA structure format */
+              {
+                "Speed": $.speed_percent,
+                "TargetRate": $.target_rate,
+                "QualityThreshold": $.quality_threshold / 100,
+                "LastModified": $now()
+              }
+
+      # Convert machine commands to OPC UA control structure
+      - subscribe:
+          topic: manufacturing/machine/commands
+        publish:
+          endpoint: !ref machineControlWrite
+        rules:
+        - transform:
+            expression: |
+              /* Convert machine commands to OPC UA control format */
+              /* Input: {"action": "start", "mode": "automatic", "safety_override": false} */
+              /* Output: OPC UA control structure */
+              {
+                "Command": $.action = "start" ? 1 :
+                          $.action = "stop" ? 2 :
+                          $.action = "pause" ? 3 :
+                          $.action = "reset" ? 4 : 0,
+                "Mode": $.mode = "automatic" ? 1 :
+                       $.mode = "manual" ? 2 :
+                       $.mode = "maintenance" ? 3 : 0,
+                "SafetyOverride": $.safety_override,
+                "CommandTimestamp": $now(),
+                "Operator": $.operator ? $.operator : "system"
+              }
+
+# Input Format Examples:
+#
+# 1. HVAC Temperature Control:
+#    Input: {"setpoint_celsius": 22.5, "zone": "production_floor"}
+#    OPC UA Output: 22.5
+#
+# 2. Production Parameters:
+#    Input: {"speed_percent": 85, "target_rate": 120, "quality_threshold": 95}
+#    OPC UA Output: {"Speed": 85, "TargetRate": 120, "QualityThreshold": 0.95}
+#
+# 3. Machine Control:
+#    Input: {"action": "start", "mode": "automatic", "safety_override": false}
+#    OPC UA Output: {"Command": 1, "Mode": 1, "SafetyOverride": false}
+
+# Key Concepts:
+# ✅ Value Extraction: Simple values from JSON structures to OPC UA nodes
+# ✅ Structure Mapping: JSON objects → OPC UA complex data types
+# ✅ Enumeration Conversion: Text commands → numeric OPC UA enums
+# ✅ Data Validation: Type checking and range validation for OPC UA

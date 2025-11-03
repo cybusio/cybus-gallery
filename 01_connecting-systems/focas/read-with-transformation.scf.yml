@@ -1,0 +1,108 @@
+description: >
+  FOCAS read with real-world transformation scenarios.
+  Shows converting Fanuc CNC PMC data to standardized manufacturing data
+  from CNC machines and machining centers.
+
+metadata:
+  name: FOCAS Read with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  focasHost:
+    type: string
+    default: "192.168.2.170"
+
+resources:
+  focasConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Focas
+      connection:
+        host: !ref focasHost
+        port: 8193
+
+  # Read spindle speed from PMC
+  spindleSpeedRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Focas
+      connection: !ref focasConnection
+      subscribe:
+        method: "pmc_rdpmcrng"
+        addressType: 1
+        dataType: 1
+        addressStart: 40
+        addressEnd: 41
+        dataLength: 10
+      topic: focas/spindle/raw
+
+  # Read machine status from PMC
+  machineStatusRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Focas
+      connection: !ref focasConnection
+      subscribe:
+        method: "pmc_rdpmcrng"
+        addressType: 1
+        dataType: 0
+        addressStart: 100
+        addressEnd: 101
+        dataLength: 8
+      topic: focas/status/raw
+
+  # Transform FOCAS PMC data to standard manufacturing format
+  focasDataTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert PMC spindle data to standard format
+      - subscribe:
+          endpoint: !ref spindleSpeedRead
+        publish:
+          topic: manufacturing/cnc/spindle
+        rules:
+        - transform:
+            expression: |
+              {
+                "machine_id": "FANUC_CNC_001",
+                "spindle_speed_rpm": $.cdata[0] * 256 + $.cdata[1],
+                "spindle_load_percent": $.cdata[2],
+                "feed_rate_mmpm": $.cdata[3] * 10,
+                "timestamp": $now()
+              }
+
+      # Convert PMC status bits to machine status
+      - subscribe:
+          endpoint: !ref machineStatusRead
+        publish:
+          topic: manufacturing/cnc/status
+        rules:
+        - transform:
+            expression: |
+              {
+                "machine_id": "FANUC_CNC_001",
+                "cycle_start": ($.cdata[0] & 1) > 0,
+                "feed_hold": ($.cdata[0] & 2) > 0,
+                "emergency_stop": ($.cdata[0] & 4) > 0,
+                "auto_mode": ($.cdata[0] & 8) > 0,
+                "timestamp": $now()
+              }
+
+# Real-World Transformation Examples:
+#
+# 1. Spindle Data: {"cdata": [12, 80, 75, 150]}  (PMC format)
+#    → {"spindle_speed_rpm": 3152, "spindle_running": true, "spindle_load_percent": 75, "feed_rate_mmpm": 1500}
+#
+# 2. Status Data: {"cdata": [9, 0, 0, 0]}  (PMC bits: cycle_start=1, auto_mode=1)
+#    → {"cycle_start": true, "auto_mode": true, "emergency_stop": false, "program_running": true, "status": "running"}
+
+# Key Concepts:
+# ✅ PMC Data Access: Reading Fanuc PMC registers and data
+# ✅ Multi-byte Values: Combining high/low bytes for 16-bit values  
+# ✅ Bit Operations: Extracting status flags from PMC data bytes
+# ✅ CNC Status Logic: Converting PMC bits to machine states
+# ✅ Manufacturing Metrics: Spindle speed, feed rate, load monitoring

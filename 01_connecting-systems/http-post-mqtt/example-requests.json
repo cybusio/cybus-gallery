@@ -1,0 +1,51 @@
+{
+  "name": "simple-http-post-mqtt",
+  "version": "1.0.0",
+  "description": "Simple HTTP POST to MQTT bridge test requests",
+  "requests": [
+    {
+      "name": "Temperature Data",
+      "method": "POST",
+      "url": "https://your-connectware.com/data/api/sensor-data",
+      "headers": {
+        "Content-Type": "application/json",
+        "Authorization": "Basic <YOUR_AUTH_TOKEN>"
+      },
+      "body": {
+        "temperature": 23.5,
+        "humidity": 60,
+        "location": "Room A"
+      }
+    },
+    {
+      "name": "Machine Status",
+      "method": "POST",
+      "url": "https://your-connectware.com/data/api/sensor-data",
+      "headers": {
+        "Content-Type": "application/json",
+        "Authorization": "Basic <YOUR_AUTH_TOKEN>"
+      },
+      "body": {
+        "machine": "pump01",
+        "status": "running",
+        "pressure": 2.5,
+        "timestamp": "2025-10-22T10:30:00Z"
+      }
+    },
+    {
+      "name": "Sensor Array",
+      "method": "POST",
+      "url": "https://your-connectware.com/data/api/sensor-data",
+      "headers": {
+        "Content-Type": "application/json",
+        "Authorization": "Basic <YOUR_AUTH_TOKEN>"
+      },
+      "body": {
+        "sensors": [
+          {"id": "temp001", "value": 25.1},
+          {"id": "hum001", "value": 65}
+        ]
+      }
+    }
+  ]
+}

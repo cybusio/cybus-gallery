@@ -1,0 +1,122 @@
+description: >
+  Siemens S7 read with real-world transformation scenarios.
+  Shows converting S7 data block values to standardized industrial data
+  from Siemens PLCs and automation systems.
+
+metadata:
+  name: Siemens S7 Read with Transformation
+  provider: cybus
+  homepage: https://www.cybus.io
+  version: 1.0.0
+
+parameters:
+  s7Host:
+    type: string
+    default: "192.168.1.30"
+
+resources:
+  s7Connection:
+    type: Cybus::Connection
+    properties:
+      protocol: S7
+      connection:
+        host: !ref s7Host
+        port: 102
+        rack: 0
+        slot: 1
+
+  # Read machine data from data block
+  machineDataRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: S7
+      connection: !ref s7Connection
+      subscribe:
+        address: "DB1,B0,20"
+      topic: s7/machine/data/raw
+
+  # Read production counters
+  productionCountersRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: S7
+      connection: !ref s7Connection
+      subscribe:
+        address: "DB10,B0,16"
+      topic: s7/production/counters/raw
+
+  # Read alarm status
+  alarmStatusRead:
+    type: Cybus::Endpoint
+    properties:
+      protocol: S7
+      connection: !ref s7Connection
+      subscribe:
+        address: "M100,B0,8"
+      topic: s7/alarms/status/raw
+
+  # Transform S7 data to standard manufacturing format
+  s7DataTransformation:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      
+      # Convert S7 machine data block to standard format
+      - subscribe:
+          endpoint: !ref machineDataRead
+        publish:
+          topic: manufacturing/machine/data
+        rules:
+        - transform:
+            expression: |
+              {
+                "machine_id": "S7_PLC_001",
+                "temperature_celsius": $.temperature / 10,
+                "pressure_bar": $.pressure / 100,
+                "speed_rpm": $.speed,
+                "running": ($.status & 1) > 0,
+                "timestamp": $now()
+              }
+
+      # Convert production counters from S7 format
+      - subscribe:
+          endpoint: !ref productionCountersRead
+        publish:
+          topic: manufacturing/production/counters
+        rules:
+        - transform:
+            expression: |
+              {
+                "line_id": "PRODUCTION_LINE_001",
+                "good_parts": $.good_parts,
+                "reject_parts": $.reject_parts,
+                "cycle_count": $.cycle_count,
+                "timestamp": $now()
+              }
+
+      # Convert alarm status bits
+      - subscribe:
+          endpoint: !ref alarmStatusRead
+        publish:
+          topic: manufacturing/alarms/status
+        rules:
+        - transform:
+            expression: |
+              {
+                "system_id": "S7_PLC_001",
+                "emergency_stop": $.alarms[0],
+                "motor_fault": $.alarms[1],
+                "temperature_alarm": $.alarms[2],
+                "timestamp": $now()
+              }
+
+# Simple Real-World Examples:
+#
+# 1. Machine Data: Temperature=235, Pressure=250, Status=0x0001
+#    → {"temperature_celsius": 23.5, "pressure_bar": 2.50, "running": true}
+#
+# 2. Production Counters: Good=1485, Reject=15, Cycles=1500
+#    → {"good_parts": 1485, "reject_parts": 15, "cycle_count": 1500}
+#
+# 3. Alarm Status: [true, false, true, false, false]
+#    → {"emergency_stop": true, "motor_fault": false, "temperature_alarm": true}

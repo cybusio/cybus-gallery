@@ -1,0 +1,111 @@
+description: >
+  Production line sensor data standardization using transform rules.
+  Converts raw OPC UA sensor data from legacy machines to standardized format
+  for production monitoring and quality control systems integration.
+
+metadata:
+  name: Production Sensor Data Standardization - Field Renaming & Units
+  version: 1.0.0
+
+parameters:
+  productionOpcuaHost:
+    type: string
+    default: "192.168.100.10"
+    description: "OPC UA server for production line sensors"
+
+resources:
+  # Production Line OPC UA Connection
+  productionConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref productionOpcuaHost
+        port: 4840
+        username: "production_user"
+        password: "secure_password"
+
+  # CNC Machine 001 - Raw Sensor Data
+  cncMachine001Sensors:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref productionConnection
+      subscribe:
+        nodeId: "ns=2;s=ProductionLine.CNC001.SensorData"
+        interval: 5000
+      topic: production/cnc-001/sensors/raw
+
+  # Production Line Temperature Sensor
+  lineTemperatureSensor:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref productionConnection
+      subscribe:
+        nodeId: "ns=2;s=ProductionLine.EnvironmentalSensors.Temperature"
+        interval: 10000
+      topic: production/environment/temperature/raw
+
+  # Sensor Data Standardization - Field Renaming & Units
+  sensorDataStandardization:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          topic: ${Cybus::MqttRoot}/production/cnc-001/sensors/raw
+        publish:
+          topic: production/cnc-001/sensors/standardized
+        rules:
+        - transform:
+            expression: |
+              {
+                /* Add static machine identifier for traceability */
+                "machine_id": "CNC-001",
+                
+                /* Rename temperature fields with descriptive names */
+                "spindle_temperature": $.temp_spindle,    /* Access input field $.temp_spindle */
+                "coolant_temperature": $.temp_coolant,    /* Access input field $.temp_coolant */
+                
+                /* Rename speed field for clarity */
+                "spindle_speed": $.spd,                   /* Access input field $.spd (speed) */
+                
+                /* Rename vibration field with full descriptive name */
+                "vibration_level": $.vib,                 /* Access input field $.vib */
+                
+                /* Convert numeric mode to descriptive text using conditional */
+                "operational_mode": $.mode = 1 ? "automatic" : "manual",  /* If $.mode equals 1, output "automatic", else "manual" */
+                
+                /* Add current timestamp for when transform occurred */
+                "timestamp": $now()                       /* $now() function returns current timestamp in milliseconds */
+              }
+
+# Example Input Message (from CNC Machine OPC UA):
+#
+# Topic: production/cnc-001/sensors/raw
+# Raw Legacy Format:
+# {
+#   "temp_spindle": 68.5,
+#   "temp_coolant": 25.3,
+#   "spd": 2100,
+#   "vib": 1.8,
+#   "mode": 1
+# }
+#
+# Expected Output:
+# Topic: production/cnc-001/sensors/standardized
+# Standardized Format:
+# {
+#   "machine_id": "CNC-001",
+#   "spindle_temperature": 68.5,
+#   "coolant_temperature": 25.3,
+#   "spindle_speed": 2100,
+#   "vibration_level": 1.8,
+#   "operational_mode": "automatic",
+#   "timestamp": 1730529600000
+# }
+
+# KEY CONCEPTS:
+# ✅ Field renaming: temp_spindle → spindle_temperature  
+# ✅ Value mapping: mode numbers → descriptive text
+# ✅ Data enrichment: Adding timestamp and machine ID

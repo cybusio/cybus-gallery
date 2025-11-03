@@ -1,0 +1,128 @@
+description: >
+  Production line efficiency monitoring with wildcard collect patterns.
+  Aggregates OEE data from multiple manufacturing lines using dynamic labels.
+  Demonstrates cross-line analytics and performance benchmarking.
+
+metadata:
+  name: Multi-Line Production Efficiency - Wildcard Collect
+  version: 1.0.0
+
+parameters:
+  mesServerHost:
+    type: string
+    default: "192.168.100.10"
+    description: "Manufacturing Execution System server"
+
+resources:
+  # MES Connection for Production Data
+  mesConnection:
+    type: Cybus::Connection
+    properties:
+      protocol: Opcua
+      connection:
+        host: !ref mesServerHost
+        port: 4840
+
+  # Production Line A - OEE Data
+  # NOTE: This endpoint uses the pattern: production/lines/{line-id}/oee-metrics
+  # The wildcard collect mapping will automatically aggregate data from all lines
+  lineAOeeEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref mesConnection
+      subscribe:
+        nodeId: ns=2;s=ProductionLine.A.OEE.Current
+        interval: 30000
+      topic: production/lines/line-a/oee-metrics
+
+  # Production Line B - OEE Data  
+  # NOTE: Same topic pattern as line-a but different line ID - both automatically
+  # collected by wildcard: production/lines/+line/oee-metrics
+  lineBOeeEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref mesConnection
+      subscribe:
+        nodeId: ns=2;s=ProductionLine.B.OEE.Current
+        interval: 30000
+      topic: production/lines/line-b/oee-metrics
+
+  # Production Line C - OEE Data
+  # NOTE: Third line following same pattern - demonstrates scalability
+  # Each line gets unique label: 'line_{line}' to prevent data collision
+  lineCOeeEndpoint:
+    type: Cybus::Endpoint
+    properties:
+      protocol: Opcua
+      connection: !ref mesConnection
+      subscribe:
+        nodeId: ns=2;s=ProductionLine.C.OEE.Current
+        interval: 30000
+      topic: production/lines/line-c/oee-metrics
+
+  # EXPANSION EXAMPLES: You could easily add more production lines:
+  # - production/lines/line-d/oee-metrics (Assembly Line D)
+  # - production/lines/line-e/oee-metrics (Packaging Line E) 
+  # - production/lines/pilot-line/oee-metrics (Pilot Production Line)
+  # All would be automatically included in the collect mapping without changes!
+
+  # Multi-Line Production Analytics with Collect
+  productionAnalytics:
+    type: Cybus::Mapping
+    properties:
+      mappings:
+      - subscribe:
+          # Wildcard pattern: production/lines/+line/oee-metrics
+          # Dynamic label prevents data conflicts between lines
+          topic: ${Cybus::MqttRoot}/production/lines/+line/oee-metrics
+          label: 'line_{line}'
+        publish:
+          topic: analytics/production/multi-line-summary
+        rules:
+        - collect: {}  # Aggregate all production lines
+        - transform:
+            expression: |
+              {
+                "timestamp": $now(),
+                "triggered_by_line": $context.vars.line,
+                "line_count": $count($keys($)),
+                "current_line_data": $lookup($, 'line_' & $context.vars.line),
+                "all_lines_data": $
+              }
+
+# Example Input Messages (from OPC UA endpoints):
+#
+# From !ref lineAOeeEndpoint
+# Topic: production/lines/line-a/oee-metrics
+# Payload: {"oee": 87.5, "availability": 95.2, "performance": 91.8, "quality": 99.9}
+#
+# From !ref lineBOeeEndpoint  
+# Topic: production/lines/line-b/oee-metrics
+# Payload: {"oee": 92.1, "availability": 97.8, "performance": 94.2, "quality": 99.9}
+#
+# From !ref lineCOeeEndpoint
+# Topic: production/lines/line-c/oee-metrics  
+# Payload: {"oee": 85.3, "availability": 89.4, "performance": 95.4, "quality": 99.9}
+#
+# After Collect Rule - All Lines Aggregated:
+# {
+#   "line_line-a": {"oee": 87.5, "availability": 95.2, "performance": 91.8, "quality": 99.9},
+#   "line_line-b": {"oee": 92.1, "availability": 97.8, "performance": 94.2, "quality": 99.9},
+#   "line_line-c": {"oee": 85.3, "availability": 89.4, "performance": 95.4, "quality": 99.9}
+# }
+#
+# Expected Output (when line-c data arrives):
+# Topic: analytics/production/multi-line-summary
+# {
+#   "timestamp": 1730115600000,
+#   "triggered_by_line": "line-c",
+#   "line_count": 3,
+#   "current_line_data": {"oee": 85.3, "availability": 89.4, "performance": 95.4, "quality": 99.9},
+#   "all_lines_data": {
+#     "line_line-a": {"oee": 87.5, "availability": 95.2, "performance": 91.8, "quality": 99.9},
+#     "line_line-b": {"oee": 92.1, "availability": 97.8, "performance": 94.2, "quality": 99.9}, 
+#     "line_line-c": {"oee": 85.3, "availability": 89.4, "performance": 95.4, "quality": 99.9}
+#   }
+# }
